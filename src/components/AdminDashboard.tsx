@@ -35,7 +35,10 @@ import {
   Hash,
   CheckCircle2,
   AlertCircle,
-  Mail
+  Mail,
+  PowerOff,
+  RotateCcw,
+  MessageSquare
 } from 'lucide-react';
 import {
   AreaChart,
@@ -184,6 +187,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
   const [replyingInquiry, setReplyingInquiry] = useState<SupportInquiry | null>(null);
   const [replyText, setReplyText] = useState<string>('');
   const [submittingReply, setSubmittingReply] = useState<boolean>(false);
+  const [shutDownAfterReply, setShutDownAfterReply] = useState<boolean>(false);
+  const [inquiryFeedback, setInquiryFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // Blog state
   const [postsList, setPostsList] = useState<BlogPost[]>([]);
@@ -237,11 +242,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
     host: 'smtp.gmail.com',
     port: 587,
     secure: false,
-    user: 'abdallahbourrich66@gmail.com',
-    pass: '',
-    hasPassword: false,
+    user: 'teachermatehelp@gmail.com',
+    pass: 'hicl yeie vooq jwxn',
+    hasPassword: true,
     fromName: 'رفيق المعلم الجزائري - Teacher Mate DZ',
-    fromEmail: 'abdallahbourrich66@gmail.com'
+    fromEmail: 'teachermatehelp@gmail.com'
   });
   const [loadingSmtp, setLoadingSmtp] = useState<boolean>(false);
   const [savingSmtp, setSavingSmtp] = useState<boolean>(false);
@@ -851,7 +856,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
         setSmtpSettings(prev => ({
           ...prev,
           ...data,
-          pass: '' // do not display actual password for security
+          user: data.user || 'teachermatehelp@gmail.com',
+          fromEmail: data.fromEmail || 'teachermatehelp@gmail.com',
+          pass: prev.pass || 'hicl yeie vooq jwxn'
         }));
       }
     } catch (e) {
@@ -1033,26 +1040,87 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
   };
 
   // Inquiries Handlers
-  const handleSendReply = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSendReply = async (e?: React.FormEvent, forceShutdown?: boolean) => {
+    if (e) e.preventDefault();
     if (!replyingInquiry) return;
     setSubmittingReply(true);
+    setInquiryFeedback(null);
+    const shouldClose = forceShutdown !== undefined ? forceShutdown : shutDownAfterReply;
     try {
       const res = await fetch(`/api/admin/inquiries/${encodeURIComponent(replyingInquiry.id)}/reply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reply: replyText })
+        body: JSON.stringify({ 
+          reply: replyText,
+          shutDownAfter: shouldClose
+        })
       });
+      const data = await res.json();
       if (res.ok) {
         setReplyingInquiry(null);
         setReplyText('');
+        setShutDownAfterReply(false);
         fetchInquiries();
         fetchStats();
+        const emailMsg = data.emailSent
+          ? 'تم إرسال الرد بنجاح إلى بريد الأستاذ عبر Nodemailer'
+          : data.emailError
+          ? `(تنبيه البريد: ${data.emailError})`
+          : '';
+        setInquiryFeedback({
+          type: 'success',
+          message: `${shouldClose ? 'تم إغلاق الرسالة' : 'تم إرسال الرد'} وحفظها في قسم استفسارات الأستاذ بالموقع. ${emailMsg}`
+        });
+        setTimeout(() => setInquiryFeedback(null), 6000);
+      } else {
+        setInquiryFeedback({
+          type: 'error',
+          message: data.error || 'فشل إرسال الرد'
+        });
+      }
+    } catch (err: any) {
+      console.error(err);
+      setInquiryFeedback({
+        type: 'error',
+        message: 'خطأ في الاتصال بالسيرفر'
+      });
+    } finally {
+      setSubmittingReply(false);
+    }
+  };
+
+  const handleToggleShutdownInquiry = async (inq: SupportInquiry) => {
+    const isCurrentlyClosed = inq.status === 'closed';
+    const newStatus = isCurrentlyClosed ? (inq.adminReply ? 'replied' : 'pending') : 'closed';
+    const confirmText = isCurrentlyClosed
+      ? 'هل أنت متأكد من إعادة فتح هذه الرسالة؟'
+      : inq.isSOS
+      ? 'هل أنت متأكد من إيقاف وإغلاق بلاغ الطوارئ SOS هذا (Shut Down Message)؟'
+      : 'هل أنت متأكد من إيقاف وإغلاق هذه الرسالة (Shut Down Message)؟';
+
+    if (!confirm(confirmText)) return;
+
+    try {
+      const res = await fetch(`/api/admin/inquiries/${encodeURIComponent(inq.id)}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        fetchInquiries();
+        fetchStats();
+        setInquiryFeedback({
+          type: 'success',
+          message: isCurrentlyClosed ? 'تم إعادة فتح الرسالة بنجاح' : 'تم إيقاف وإغلاق الرسالة بنجاح'
+        });
+        setTimeout(() => setInquiryFeedback(null), 4000);
+      } else {
+        alert(data.error || 'حدث خطأ أثناء تغيير حالة الرسالة');
       }
     } catch (err) {
       console.error(err);
-    } finally {
-      setSubmittingReply(false);
+      alert('خطأ في الاتصال بالخادم');
     }
   };
 
@@ -1288,6 +1356,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
     if (filterInquiryStatus === 'sos') return inq.isSOS;
     if (filterInquiryStatus === 'pending') return inq.status === 'pending';
     if (filterInquiryStatus === 'replied') return inq.status === 'replied';
+    if (filterInquiryStatus === 'closed') return inq.status === 'closed';
     return true;
   });
 
@@ -1364,18 +1433,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
             </div>
           </div>
 
-          {/* Action Buttons */}
+            {/* Action Buttons */}
           <div className="flex items-center gap-3">
-            {onExitToSite && (
-              <button
-                onClick={handleExitAdmin}
-                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-teal-300 border border-slate-700 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 shadow-xs"
-                title="Save and Return to Website"
-              >
-                <ArrowLeft className="w-3.5 h-3.5" />
-                <span>Exit to Website</span>
-              </button>
-            )}
+            <button
+              onClick={() => window.location.href = '/'}
+              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-teal-300 border border-slate-700 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 shadow-xs"
+              title="Return to Main Page"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back to Main Page</span>
+            </button>
 
             <button
               onClick={fetchStats}
@@ -3215,118 +3282,229 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
         {activeTab === 'enquiries' && (
           <div className="space-y-4 animate-fadeIn">
             
-            <div className="flex items-center gap-2 bg-slate-800/80 border border-slate-700/80 rounded-2xl p-4 text-xs font-bold">
-              <span className="text-slate-400">Filter Inquiries:</span>
+            {/* Feedback alert */}
+            {inquiryFeedback && (
+              <div className={`p-4 rounded-2xl text-xs font-bold flex items-center justify-between gap-3 shadow-lg transition-all ${
+                inquiryFeedback.type === 'success' 
+                  ? 'bg-emerald-500/15 border border-emerald-500/40 text-emerald-300' 
+                  : 'bg-red-500/15 border border-red-500/40 text-red-300'
+              }`}>
+                <div className="flex items-center gap-2.5">
+                  {inquiryFeedback.type === 'success' ? (
+                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+                  )}
+                  <span>{inquiryFeedback.message}</span>
+                </div>
+                <button 
+                  onClick={() => setInquiryFeedback(null)} 
+                  className="p-1 hover:bg-slate-800 rounded-md text-slate-400 hover:text-white transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
+            {/* Filter bar */}
+            <div className="flex flex-wrap items-center gap-2 bg-slate-800/80 border border-slate-700/80 rounded-2xl p-4 text-xs font-bold">
+              <span className="text-slate-400 text-xs">Filter Inquiries:</span>
               
               <button
                 onClick={() => setFilterInquiryStatus('all')}
-                className={`px-3 py-1.5 rounded-lg transition-colors ${
-                  filterInquiryStatus === 'all' ? 'bg-teal-600 text-white' : 'bg-slate-900 text-slate-400 hover:text-white'
+                className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
+                  filterInquiryStatus === 'all' ? 'bg-teal-600 text-white shadow-md' : 'bg-slate-900 text-slate-400 hover:text-white'
                 }`}
               >
-                All Inquiries
+                <span>All Inquiries</span>
+                <span className="px-1.5 py-0.2 bg-black/30 rounded-full text-[10px]">{inquiriesList.length}</span>
               </button>
 
               <button
                 onClick={() => setFilterInquiryStatus('sos')}
-                className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1 ${
-                  filterInquiryStatus === 'sos' ? 'bg-red-600 text-white' : 'bg-slate-900 text-red-400 hover:text-white'
+                className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
+                  filterInquiryStatus === 'sos' ? 'bg-red-600 text-white shadow-md' : 'bg-slate-900 text-red-400 hover:text-white'
                 }`}
               >
                 <AlertTriangle className="w-3.5 h-3.5" />
                 <span>🚨 SOS Priority Only</span>
+                <span className="px-1.5 py-0.2 bg-black/30 rounded-full text-[10px]">{inquiriesList.filter(i => i.isSOS).length}</span>
               </button>
 
               <button
                 onClick={() => setFilterInquiryStatus('pending')}
-                className={`px-3 py-1.5 rounded-lg transition-colors ${
-                  filterInquiryStatus === 'pending' ? 'bg-amber-600 text-white' : 'bg-slate-900 text-slate-400 hover:text-white'
+                className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
+                  filterInquiryStatus === 'pending' ? 'bg-amber-600 text-white shadow-md' : 'bg-slate-900 text-slate-400 hover:text-white'
                 }`}
               >
-                Pending
+                <Clock className="w-3.5 h-3.5" />
+                <span>Pending</span>
+                <span className="px-1.5 py-0.2 bg-black/30 rounded-full text-[10px]">{inquiriesList.filter(i => i.status === 'pending').length}</span>
               </button>
 
               <button
                 onClick={() => setFilterInquiryStatus('replied')}
-                className={`px-3 py-1.5 rounded-lg transition-colors ${
-                  filterInquiryStatus === 'replied' ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-slate-400 hover:text-white'
+                className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
+                  filterInquiryStatus === 'replied' ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-900 text-slate-400 hover:text-white'
                 }`}
               >
-                Replied
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Replied</span>
+                <span className="px-1.5 py-0.2 bg-black/30 rounded-full text-[10px]">{inquiriesList.filter(i => i.status === 'replied').length}</span>
+              </button>
+
+              <button
+                onClick={() => setFilterInquiryStatus('closed')}
+                className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
+                  filterInquiryStatus === 'closed' ? 'bg-slate-700 text-white shadow-md' : 'bg-slate-900 text-slate-400 hover:text-white'
+                }`}
+              >
+                <PowerOff className="w-3.5 h-3.5 text-rose-400" />
+                <span>Shut Down (Closed)</span>
+                <span className="px-1.5 py-0.2 bg-black/30 rounded-full text-[10px]">{inquiriesList.filter(i => i.status === 'closed').length}</span>
               </button>
             </div>
 
+            {/* Inquiries List */}
             <div className="space-y-3">
-              {filteredInquiries.map((inq) => (
-                <div
-                  key={inq.id}
-                  className={`bg-slate-800/80 border rounded-2xl p-5 space-y-3 transition-all ${
-                    inq.isSOS && inq.status === 'pending'
-                      ? 'border-red-500/80 shadow-lg shadow-red-500/10'
-                      : 'border-slate-700/80'
-                  }`}
-                >
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-700/60 pb-3">
-                    <div className="flex items-center gap-2">
-                      {inq.isSOS && (
-                        <span className="px-2 py-0.5 bg-red-600 text-white text-[10px] font-extrabold rounded-md flex items-center gap-1 animate-pulse">
-                          <AlertTriangle className="w-3 h-3" />
-                          <span>SOS PRIORITY</span>
-                        </span>
-                      )}
-                      <h4 className="font-extrabold text-white text-sm">
-                        {inq.subject}
-                      </h4>
-                    </div>
-
-                    <span className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold ${
-                      inq.status === 'replied' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
-                    }`}>
-                      {inq.status === 'replied' ? 'Replied' : 'Pending Admin Reply'}
-                    </span>
-                  </div>
-
-                  <div className="text-xs text-slate-300 leading-relaxed bg-slate-900/60 p-3 rounded-xl border border-slate-800">
-                    {inq.message}
-                  </div>
-
-                  {inq.adminReply && (
-                    <div className="bg-teal-950/40 border border-teal-500/30 p-3 rounded-xl space-y-1">
-                      <div className="text-[11px] font-extrabold text-teal-400 flex items-center gap-1">
-                        <ShieldCheck className="w-3.5 h-3.5" />
-                        <span>Admin Technical Response:</span>
-                      </div>
-                      <p className="text-xs text-slate-200">{inq.adminReply}</p>
-                    </div>
-                  )}
-
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-2 text-[11px] text-slate-400">
-                    <div>
-                      <span>{inq.userName} ({inq.userEmail}) • {inq.wilaya}</span>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => {
-                          setReplyingInquiry(inq);
-                          setReplyText(inq.adminReply || '');
-                        }}
-                        className="px-3 py-1.5 bg-[#0D9488] hover:bg-teal-700 text-white font-extrabold rounded-lg transition-colors flex items-center gap-1"
-                      >
-                        <Send className="w-3 h-3" />
-                        <span>{inq.adminReply ? 'Update Reply' : 'Send Admin Reply'}</span>
-                      </button>
-
-                      <button
-                        onClick={() => handleDeleteInquiry(inq.id)}
-                        className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg transition-colors"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
+              {filteredInquiries.length === 0 ? (
+                <div className="bg-slate-800/50 border border-slate-700/60 rounded-2xl p-10 text-center space-y-2 text-slate-400">
+                  <MessageSquare className="w-8 h-8 mx-auto text-slate-500 opacity-60" />
+                  <p className="text-sm font-bold text-slate-300">No inquiries found in this category</p>
+                  <p className="text-xs text-slate-500">Teachers have not submitted any messages matching this filter yet.</p>
                 </div>
-              ))}
+              ) : (
+                filteredInquiries.map((inq) => (
+                  <div
+                    key={inq.id}
+                    className={`bg-slate-800/80 border rounded-2xl p-5 space-y-3 transition-all ${
+                      inq.status === 'closed'
+                        ? 'border-slate-700/50 opacity-80 bg-slate-850'
+                        : inq.isSOS && inq.status === 'pending'
+                        ? 'border-red-500/80 shadow-lg shadow-red-500/10'
+                        : 'border-slate-700/80'
+                    }`}
+                  >
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-slate-700/60 pb-3">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {inq.isSOS && (
+                          <span className="px-2 py-0.5 bg-red-600 text-white text-[10px] font-extrabold rounded-md flex items-center gap-1 animate-pulse">
+                            <AlertTriangle className="w-3 h-3" />
+                            <span>SOS PRIORITY</span>
+                          </span>
+                        )}
+                        <span className="px-2 py-0.5 bg-slate-900 text-slate-400 text-[10px] font-bold rounded">
+                          {inq.category}
+                        </span>
+                        <h4 className="font-extrabold text-white text-sm">
+                          {inq.subject}
+                        </h4>
+                      </div>
+
+                      <span className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold flex items-center gap-1.5 ${
+                        inq.status === 'replied' 
+                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' 
+                          : inq.status === 'closed'
+                          ? 'bg-slate-700/60 text-slate-300 border border-slate-600/60'
+                          : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                      }`}>
+                        {inq.status === 'replied' ? (
+                          <>
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>Replied</span>
+                          </>
+                        ) : inq.status === 'closed' ? (
+                          <>
+                            <PowerOff className="w-3.5 h-3.5 text-rose-400" />
+                            <span>Shut Down / Closed</span>
+                          </>
+                        ) : (
+                          <>
+                            <Clock className="w-3.5 h-3.5 text-amber-400" />
+                            <span>Pending Admin Reply</span>
+                          </>
+                        )}
+                      </span>
+                    </div>
+
+                    <div className="text-xs text-slate-300 leading-relaxed bg-slate-900/60 p-3.5 rounded-xl border border-slate-800">
+                      {inq.message}
+                    </div>
+
+                    {inq.adminReply && (
+                      <div className="bg-teal-950/40 border border-teal-500/30 p-3.5 rounded-xl space-y-1.5">
+                        <div className="text-[11px] font-extrabold text-teal-400 flex items-center justify-between">
+                          <span className="flex items-center gap-1.5">
+                            <ShieldCheck className="w-4 h-4 text-teal-400" />
+                            <span>Admin Technical Response:</span>
+                          </span>
+                          {inq.repliedAt && (
+                            <span className="text-[10px] text-teal-500/80 font-normal">
+                              Sent via Nodemailer • {new Date(inq.repliedAt).toLocaleString()}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-200 leading-relaxed whitespace-pre-wrap">{inq.adminReply}</p>
+                      </div>
+                    )}
+
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-2 text-[11px] text-slate-400">
+                      <div>
+                        <span className="text-slate-300 font-bold">{inq.userName}</span>
+                        <span className="text-slate-500"> ({inq.userEmail}) • {inq.wilaya}</span>
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {/* Reply Action */}
+                        <button
+                          onClick={() => {
+                            setReplyingInquiry(inq);
+                            setReplyText(inq.adminReply || '');
+                            setShutDownAfterReply(inq.status === 'closed');
+                          }}
+                          className="px-3 py-1.5 bg-[#0D9488] hover:bg-teal-700 text-white font-extrabold rounded-lg transition-colors flex items-center gap-1.5 shadow-sm text-xs"
+                          title="Reply to message and dispatch email"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                          <span>{inq.adminReply ? 'Update Reply' : 'Reply to Teacher'}</span>
+                        </button>
+
+                        {/* Shut Down / Re-open Action */}
+                        <button
+                          onClick={() => handleToggleShutdownInquiry(inq)}
+                          className={`px-3 py-1.5 font-extrabold rounded-lg transition-colors flex items-center gap-1.5 border text-xs ${
+                            inq.status === 'closed'
+                              ? 'bg-slate-800 hover:bg-slate-700 text-teal-400 border-teal-500/30'
+                              : 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border-rose-500/30'
+                          }`}
+                          title={inq.status === 'closed' ? 'Re-open this message' : 'Shut down / close this message'}
+                        >
+                          {inq.status === 'closed' ? (
+                            <>
+                              <RotateCcw className="w-3.5 h-3.5 text-teal-400" />
+                              <span>Re-open</span>
+                            </>
+                          ) : (
+                            <>
+                              <PowerOff className="w-3.5 h-3.5 text-rose-400" />
+                              <span>Shut Down</span>
+                            </>
+                          )}
+                        </button>
+
+                        {/* Delete Action */}
+                        <button
+                          onClick={() => handleDeleteInquiry(inq.id)}
+                          className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg transition-colors"
+                          title="Delete inquiry permanently"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
 
           </div>
@@ -3976,20 +4154,51 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
               <X className="w-4 h-4" />
             </button>
 
-            <h3 className="text-base font-extrabold text-white flex items-center gap-2">
-              <Send className="w-5 h-5 text-teal-400" />
-              <span>Reply to Teacher Support Inquiry</span>
-            </h3>
-
-            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1 text-xs">
-              <span className="font-bold text-teal-400">{replyingInquiry.userName} ({replyingInquiry.wilaya})</span>
-              <p className="text-slate-300">{replyingInquiry.message}</p>
+            <div className="flex items-center gap-2.5">
+              <div className={`p-2 rounded-xl ${replyingInquiry.isSOS ? 'bg-red-500/20 text-red-400' : 'bg-teal-500/20 text-teal-400'}`}>
+                {replyingInquiry.isSOS ? <AlertTriangle className="w-5 h-5 animate-pulse" /> : <Send className="w-5 h-5" />}
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-extrabold text-white">
+                    {replyingInquiry.isSOS ? 'Respond to SOS Emergency' : 'Reply to Teacher Inquiry'}
+                  </h3>
+                  {replyingInquiry.isSOS && (
+                    <span className="px-2 py-0.5 bg-red-600 text-white text-[10px] font-extrabold rounded-md">
+                      SOS ALERT
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  {replyingInquiry.userName} ({replyingInquiry.userEmail}) • {replyingInquiry.wilaya}
+                </p>
+              </div>
             </div>
 
-            <form onSubmit={handleSendReply} className="space-y-3 text-xs">
+            {/* Email dispatch notice */}
+            <div className="p-3 bg-teal-500/10 border border-teal-500/30 rounded-xl flex items-start gap-2.5 text-xs text-teal-300">
+              <Mail className="w-4 h-4 shrink-0 mt-0.5 text-teal-400" />
+              <div className="space-y-0.5">
+                <span className="font-bold">Automated Multi-Channel Dispatch:</span>
+                <p className="text-[11px] text-teal-200/80 leading-relaxed">
+                  Your reply will be emailed directly to <strong>{replyingInquiry.userEmail}</strong> via Nodemailer and saved to the teacher's inquiry dashboard on the website.
+                </p>
+              </div>
+            </div>
+
+            {/* Message Details */}
+            <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-1.5 text-xs">
+              <div className="flex items-center justify-between text-slate-400 border-b border-slate-850 pb-1.5">
+                <span className="font-bold text-teal-400">{replyingInquiry.subject}</span>
+                <span className="text-[10px]">{replyingInquiry.category}</span>
+              </div>
+              <p className="text-slate-300 leading-relaxed whitespace-pre-wrap">{replyingInquiry.message}</p>
+            </div>
+
+            <form onSubmit={(e) => handleSendReply(e)} className="space-y-4 text-xs">
               <div>
-                <label className="block text-slate-400 font-bold mb-1">
-                  Official Technical Response
+                <label className="block text-slate-300 font-bold mb-1.5">
+                  Official Technical Response:
                 </label>
                 <textarea
                   rows={4}
@@ -3997,18 +4206,54 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
                   value={replyText}
                   onChange={(e) => setReplyText(e.target.value)}
                   placeholder="Write clear instructions or solution for the teacher..."
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-white focus:outline-none focus:border-teal-500"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-white focus:outline-none focus:border-teal-500 text-xs"
                 />
               </div>
 
-              <button
-                type="submit"
-                disabled={submittingReply}
-                className="w-full py-3 bg-[#0D9488] hover:bg-teal-700 text-white font-extrabold text-xs rounded-xl transition-all flex items-center justify-center gap-2"
-              >
-                <Send className="w-4 h-4" />
-                <span>{submittingReply ? 'Sending Response...' : 'Send Response to Teacher'}</span>
-              </button>
+              {/* Shut down checkbox */}
+              <label className="flex items-center gap-2.5 cursor-pointer text-xs text-slate-300 font-medium select-none bg-slate-950/60 p-2.5 rounded-xl border border-slate-800 hover:border-slate-700 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={shutDownAfterReply}
+                  onChange={(e) => setShutDownAfterReply(e.target.checked)}
+                  className="rounded bg-slate-900 border-slate-700 text-teal-500 focus:ring-teal-500 w-4 h-4"
+                />
+                <span className="flex items-center gap-1.5">
+                  <PowerOff className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Shut down (close) this inquiry ticket after sending response</span>
+                </span>
+              </label>
+
+              <div className="flex flex-col sm:flex-row items-center gap-2 pt-1">
+                <button
+                  type="submit"
+                  disabled={submittingReply}
+                  className="w-full sm:flex-1 py-2.5 bg-[#0D9488] hover:bg-teal-700 text-white font-extrabold text-xs rounded-xl transition-all flex items-center justify-center gap-2 shadow-md"
+                >
+                  <Send className="w-4 h-4" />
+                  <span>
+                    {submittingReply 
+                      ? 'Sending...' 
+                      : shutDownAfterReply 
+                      ? 'Send Reply & Shut Down' 
+                      : 'Send Reply (Email & Web)'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={submittingReply}
+                  onClick={() => {
+                    handleToggleShutdownInquiry(replyingInquiry);
+                    setReplyingInquiry(null);
+                  }}
+                  className="w-full sm:w-auto px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-rose-300 hover:text-white font-extrabold text-xs rounded-xl border border-slate-700 transition-all flex items-center justify-center gap-1.5"
+                  title="Shut down or close ticket without sending a reply now"
+                >
+                  <PowerOff className="w-3.5 h-3.5 text-rose-400" />
+                  <span>{replyingInquiry.status === 'closed' ? 'Re-open' : 'Shut Down Only'}</span>
+                </button>
+              </div>
             </form>
           </div>
         </div>

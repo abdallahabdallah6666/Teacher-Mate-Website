@@ -1,0 +1,81 @@
+{
+  "users": [
+    [
+      "abdallahbourrich66@gmail.com",
+      {
+        "id": "user-abdallah-66",
+        "firstName": "Abdallah",
+        "lastName": "Bourrich",
+        "fullName": "Abdallah Bourrich",
+        "email": "abdallahbourrich66@gmail.com",
+        "password": "abdallah66",
+        "role": "admin",
+        "wilaya": "16 - الجزائر",
+        "schoolName": "الإدارة المركزية - نظام رفيق أستاذ الإنجليزية",
+        "primaryGrade": "4AP",
+        "licenseKey": "TC-ALG-ADMIN-MASTER-001",
+        "licenseStatus": "active",
+        "licensePlan": "pro",
+        "createdAt": "2026-01-10T10:00:00.000Z",
+        "expiresAt": "2027-01-10",
+        "amountPaidDZD": 3000,
+        "paidVia": "Chargily Pay v2 (Edahabia/CIB)",
+        "maxDevices": 1,
+        "invoiceNumber": "INV-2026-ABD101"
+      }
+    ]
+  ],
+  "licenses": [
+    [
+      "TC-ALG-ADMIN-MASTER-001",
+      {
+        "id": "lic-abdallah-101",
+        "key": "TC-ALG-ADMIN-MASTER-001",
+        "userEmail": "abdallahbourrich66@gmail.com",
+        "userName": "Abdallah Bourrich",
+        "plan": "pro",
+        "status": "active",
+        "issuedAt": "2026-01-10",
+        "expiresAt": "2027-01-10",
+        "paidVia": "Chargily Pay v2 (Edahabia/CIB)",
+        "amountDZD": 3000,
+        "maxDevices": 1,
+        "invoiceNumber": "INV-2026-ABD101"
+      }
+    ]
+  ],
+  "inquiries": [
+    [
+      "inq-1792370107209",
+      {
+        "id": "inq-1792370107209",
+        "userId": "guest",
+        "userEmail": "testteacher@example.com",
+        "userName": "Teacher Amina",
+        "wilaya": "31 - وهران",
+        "subject": "🚨 [طوارئ SOS] Need help activating license",
+        "category": "🚨 بلاغ عاجل جداً (SOS Priority)",
+        "message": "Hello, please help me activate my license on my school PC.",
+        "status": "replied",
+        "isSOS": true,
+        "priority": "urgent",
+        "createdAt": "2026-10-19T00:35:07.209Z",
+        "adminReply": "تم التحقق وتفعيل رخصتك بنجاح، يمكنك الآن استخدام البرنامج على حاسوبك.",
+        "repliedAt": "2026-10-19T00:35:13.804Z"
+      }
+    ]
+  ],
+  "promoCodes": [
+    [
+      "TEACHER2026",
+      {
+        "code": "TEACHER2026",
+        "discountPercent": 10,
+        "isActive": 1,
+        "uses": 0,
+        "maxUses": 100
+      }
+    ]
+  ],
+  "tutorials": []
+}

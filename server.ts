@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
@@ -7,7 +8,9 @@ import {
   loadSmtpSettings,
   saveSmtpSettings,
   createSmtpTransporter,
-  sendLicenseEmailViaNodemailer
+  sendLicenseEmailViaNodemailer,
+  sendResetCodeEmailViaNodemailer,
+  sendInquiryReplyEmailViaNodemailer
 } from "./src/smtp.ts";
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
@@ -39,7 +42,7 @@ import {
 dotenv.config();
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = 3000;
 
 app.use(express.json({
   verify: (req, _res, buffer) => {
@@ -63,13 +66,108 @@ function getGeminiClient() {
   });
 }
 
-// In-memory simple store for licenses, users, and inquiries
-const dbUsers = new Map<string, any>();
-const dbLicenses = new Map<string, any>();
-const dbInquiries = new Map<string, any>();
+// Persistent store for licenses, users, and inquiries
+const DB_STORAGE_FILE = path.join(process.cwd(), 'src/db/persistent-db.json');
+
+let saveTimeout: NodeJS.Timeout | null = null;
+function scheduleSaveDb() {
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    try {
+      const data = {
+        users: Array.from(dbUsers.entries()),
+        licenses: Array.from(dbLicenses.entries()),
+        inquiries: Array.from(dbInquiries.entries()),
+        promoCodes: Array.from(dbPromoCodes.entries()),
+        tutorials: Array.from(dbTutorials.entries())
+      };
+      const dir = path.dirname(DB_STORAGE_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(DB_STORAGE_FILE, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (e) {
+      console.error('[PersistentDB] Failed to save database to disk:', e);
+    }
+  }, 100);
+}
+
+function bindPersistence<K, V>(map: Map<K, V>): Map<K, V> {
+  const origSet = map.set.bind(map);
+  const origDelete = map.delete.bind(map);
+  const origClear = map.clear.bind(map);
+
+  map.set = function(key: K, val: V) {
+    const res = origSet(key, val);
+    scheduleSaveDb();
+    return res;
+  };
+  map.delete = function(key: K) {
+    const res = origDelete(key);
+    scheduleSaveDb();
+    return res;
+  };
+  map.clear = function() {
+    origClear();
+    scheduleSaveDb();
+  };
+  return map;
+}
+
+const dbUsers = bindPersistence(new Map<string, any>());
+const dbLicenses = bindPersistence(new Map<string, any>());
+const dbInquiries = bindPersistence(new Map<string, any>());
+const dbResetCodes = new Map<string, { code: string; expiresAt: number; email: string; verified?: boolean }>();
 let paymentStore: PaymentStore;
 
-// Seed clean database with only master admin account
+const dbBlogPosts = bindPersistence(new Map<string, any>());
+const dbTutorials = bindPersistence(new Map<string, any>());
+const dbPromoCodes = bindPersistence(new Map<string, any>());
+
+// Forgot Password Routes
+app.post('/api/auth/forgot-password-code', async (req, res) => {
+  const { email } = req.body;
+  if (!email || !dbUsers.has(email.toLowerCase())) return res.status(404).json({ error: 'User not found' });
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  dbResetCodes.set(email.toLowerCase(), { code, expiresAt: Date.now() + 10 * 60 * 1000, email: email.toLowerCase() });
+  const result = await sendResetCodeEmailViaNodemailer(email, code);
+  if (!result.success) return res.status(500).json({ error: result.error });
+  res.json({ success: true });
+});
+
+app.post('/api/auth/verify-code', async (req, res) => {
+  const { email, code } = req.body;
+  const resetData = dbResetCodes.get(email.toLowerCase());
+  if (!resetData || resetData.code !== code || resetData.expiresAt < Date.now()) return res.status(400).json({ error: 'Invalid or expired code' });
+  
+  resetData.verified = true;
+  dbResetCodes.set(email.toLowerCase(), resetData);
+  res.json({ success: true });
+});
+
+app.post('/api/auth/reset-password', async (req, res) => {
+  const { email, code, newPassword } = req.body;
+  const resetData = dbResetCodes.get(email.toLowerCase());
+  if (!resetData || resetData.code !== code || !resetData.verified) return res.status(400).json({ error: 'Invalid verification' });
+  
+  try {
+    // Update password in local DB
+    const user = dbUsers.get(email.toLowerCase());
+    if (user) {
+      user.password = newPassword;
+      dbUsers.set(email.toLowerCase(), user);
+    }
+
+    dbResetCodes.delete(email.toLowerCase());
+    
+    // Refresh user state after password change
+    const updatedUser = dbUsers.get(email.toLowerCase());
+    res.json({ user: updatedUser });
+  } catch (e: any) {
+    console.error('[Auth] Password reset failed:', e);
+    res.status(500).json({ error: 'Failed to update password' });
+  }
+});
+
+// Master admin seed account
 const initialUser = {
   id: 'user-abdallah-66',
   firstName: 'Abdallah',
@@ -84,9 +182,13 @@ const initialUser = {
   licenseKey: 'TC-ALG-ADMIN-MASTER-001',
   licenseStatus: 'active',
   licensePlan: 'pro',
-  createdAt: '2026-01-10T10:00:00.000Z'
+  createdAt: '2026-01-10T10:00:00.000Z',
+  expiresAt: '2027-01-10',
+  amountPaidDZD: 3000,
+  paidVia: 'Chargily Pay v2 (Edahabia/CIB)',
+  maxDevices: 1,
+  invoiceNumber: 'INV-2026-ABD101'
 };
-dbUsers.set(initialUser.email, initialUser);
 
 const seedLicensesList = [
   {
@@ -97,25 +199,60 @@ const seedLicensesList = [
     plan: 'pro',
     status: 'active',
     issuedAt: '2026-01-10',
-    expiresAt: '2027-09-01',
+    expiresAt: '2027-01-10',
     paidVia: 'Chargily Pay v2 (Edahabia/CIB)',
     amountDZD: 3000,
-    maxDevices: 1
+    maxDevices: 1,
+    invoiceNumber: 'INV-2026-ABD101'
   }
 ];
-seedLicensesList.forEach(l => dbLicenses.set(l.key, l));
 
-// Initial support inquiries (empty by default)
-const seedInquiriesList: any[] = [];
-seedInquiriesList.forEach(i => dbInquiries.set(i.id, i));
+function initPersistentDatabase() {
+  if (fs.existsSync(DB_STORAGE_FILE)) {
+    try {
+      const raw = fs.readFileSync(DB_STORAGE_FILE, 'utf-8');
+      const data = JSON.parse(raw);
+      if (Array.isArray(data.users)) {
+        for (const [k, v] of data.users) dbUsers.set(k, v);
+      }
+      if (Array.isArray(data.licenses)) {
+        for (const [k, v] of data.licenses) dbLicenses.set(k, v);
+      }
+      if (Array.isArray(data.inquiries)) {
+        for (const [k, v] of data.inquiries) dbInquiries.set(k, v);
+      }
+      if (Array.isArray(data.promoCodes)) {
+        for (const [k, v] of data.promoCodes) dbPromoCodes.set(k, v);
+      }
+      if (Array.isArray(data.tutorials)) {
+        for (const [k, v] of data.tutorials) dbTutorials.set(k, v);
+      }
+      console.log(`[PersistentDB] Loaded from file: ${dbUsers.size} users, ${dbLicenses.size} licenses, ${dbInquiries.size} inquiries, ${dbPromoCodes.size} promos`);
+    } catch (e) {
+      console.error('[PersistentDB] Error loading file:', e);
+    }
+  }
 
-// In-memory store for Blog Posts and Tutorials
-const dbBlogPosts = new Map<string, any>();
-const dbTutorials = new Map<string, any>();
-const dbPromoCodes = new Map<string, any>();
+  // Ensure master admin user always exists
+  if (!dbUsers.has(initialUser.email.toLowerCase())) {
+    dbUsers.set(initialUser.email.toLowerCase(), initialUser);
+  }
+  if (!dbUsers.has(initialUser.email)) {
+    dbUsers.set(initialUser.email, initialUser);
+  }
+  // Ensure seed master license is present if empty
+  if (dbLicenses.size === 0) {
+    seedLicensesList.forEach(l => dbLicenses.set(l.key, l));
+  }
+  // Seed initial promo codes if missing
+  if (!dbPromoCodes.has('TEACHER2026')) {
+    dbPromoCodes.set('TEACHER2026', { code: 'TEACHER2026', discountPercent: 10, isActive: 1, uses: 0, maxUses: 100 });
+  }
 
-// Seed initial promo codes
-dbPromoCodes.set('TEACHER2026', { code: 'TEACHER2026', discountPercent: 10, isActive: 1, uses: 0, maxUses: 100 });
+  scheduleSaveDb();
+}
+
+initPersistentDatabase();
 
 // Promo Code Endpoints
 app.get("/api/admin/promos", (req, res) => {
@@ -394,6 +531,10 @@ app.post("/api/auth/register", (req, res) => {
   const cleanEmail = email.trim().toLowerCase();
   
   const userRole = (cleanEmail.includes('admin') || role === 'admin') ? 'admin' : 'user';
+  const regNow = new Date();
+  const regExp = new Date(regNow);
+  regExp.setFullYear(regExp.getFullYear() + 1);
+
   const newUser = {
     id: `user-${Date.now()}`,
     fullName: fullName.trim(),
@@ -405,7 +546,9 @@ app.post("/api/auth/register", (req, res) => {
     primaryGrade: primaryGrade || '4AP',
     licenseStatus: 'trial',
     licensePlan: 'pro',
-    createdAt: new Date().toISOString()
+    createdAt: regNow.toISOString(),
+    expiresAt: regExp.toISOString().split('T')[0],
+    maxDevices: 1
   };
 
   dbUsers.set(cleanEmail, newUser);
@@ -440,11 +583,19 @@ app.post("/api/auth/login", (req, res) => {
         licenseKey: 'TC-ALG-ADMIN-MASTER-001',
         licenseStatus: 'active',
         licensePlan: 'pro',
-        createdAt: '2026-01-10T10:00:00.000Z'
+        createdAt: '2026-01-10T10:00:00.000Z',
+        expiresAt: '2027-01-10',
+        amountPaidDZD: 3000,
+        paidVia: 'Chargily Pay v2 (Edahabia/CIB)',
+        maxDevices: 1,
+        invoiceNumber: 'INV-2026-ABD101'
       };
       dbUsers.set(cleanEmail, existingUser);
     } else {
       existingUser.role = 'admin';
+      existingUser.expiresAt = existingUser.expiresAt || '2027-01-10';
+      existingUser.maxDevices = 1;
+      existingUser.amountPaidDZD = existingUser.amountPaidDZD || 3000;
       dbUsers.set(cleanEmail, existingUser);
     }
     return res.json({ user: existingUser, token: "admin-jwt-token" });
@@ -457,6 +608,39 @@ app.post("/api/auth/login", (req, res) => {
     if (existingUser.password && existingUser.password !== password) {
       return res.status(400).json({ error: "كلمة المرور غير صحيحة" });
     }
+
+    // Merge real license and payment details
+    let lic = null;
+    if (existingUser.licenseKey && dbLicenses.has(existingUser.licenseKey)) {
+      lic = dbLicenses.get(existingUser.licenseKey);
+    } else {
+      for (const l of dbLicenses.values()) {
+        if (l.userEmail?.toLowerCase() === cleanEmail) {
+          lic = l;
+          break;
+        }
+      }
+    }
+
+    if (lic) {
+      existingUser.licenseKey = lic.key;
+      existingUser.licenseStatus = lic.status || 'active';
+      existingUser.licensePlan = lic.plan || existingUser.licensePlan || 'pro';
+      existingUser.amountPaidDZD = lic.amountDZD;
+      existingUser.promoCode = lic.promoCode;
+      existingUser.discountPercent = lic.discountPercent;
+      existingUser.paidVia = lic.paidVia;
+      existingUser.expiresAt = lic.expiresAt;
+      existingUser.maxDevices = 1;
+      existingUser.invoiceNumber = lic.invoiceNumber || `INV-${lic.id ? lic.id.replace('lic-', '').toUpperCase().slice(0, 10) : '2026-DZ'}`;
+    } else if (existingUser.createdAt && !existingUser.expiresAt) {
+      const cDate = new Date(existingUser.createdAt);
+      const eDate = new Date(cDate);
+      eDate.setFullYear(eDate.getFullYear() + 1);
+      existingUser.expiresAt = eDate.toISOString().split('T')[0];
+      existingUser.maxDevices = 1;
+    }
+
     return res.json({ user: existingUser, token: "demo-jwt-token" });
   }
 
@@ -1190,12 +1374,16 @@ app.post("/api/admin/users/:email/toggle-block", (req, res) => {
 
 // Inquiries Endpoints
 app.get("/api/admin/inquiries", (req, res) => {
-  res.json({ inquiries: Array.from(dbInquiries.values()) });
+  res.json({ inquiries: Array.from(dbInquiries.values()).reverse() });
 });
 
-app.post("/api/admin/inquiries/reply", (req, res) => {
-  const { inquiryId, adminReply } = req.body;
-  if (!inquiryId || !adminReply) {
+// Reply to an inquiry (supports both /api/admin/inquiries/:id/reply and /api/admin/inquiries/reply)
+const handleInquiryReply = async (req: express.Request, res: express.Response) => {
+  const inquiryId = (req.params.id || req.body.inquiryId || '').trim();
+  const replyText = req.body.reply || req.body.adminReply;
+  const shutDownAfter = req.body.shutDownAfter || req.body.close;
+
+  if (!inquiryId || !replyText) {
     return res.status(400).json({ error: "معرف الاستفسار ونص الرد مطلوبان" });
   }
 
@@ -1204,12 +1392,86 @@ app.post("/api/admin/inquiries/reply", (req, res) => {
     return res.status(404).json({ error: "الاستفسار غير موجود" });
   }
 
-  inq.status = 'replied';
-  inq.adminReply = adminReply;
+  inq.adminReply = replyText;
   inq.repliedAt = new Date().toISOString();
+  inq.status = shutDownAfter ? 'closed' : 'replied';
+  if (shutDownAfter) {
+    inq.closedAt = new Date().toISOString();
+  }
   dbInquiries.set(inquiryId, inq);
 
-  res.json({ success: true, inquiry: inq });
+  // Send email to user via Nodemailer
+  let emailSent = false;
+  let emailError: string | undefined = undefined;
+  if (inq.userEmail) {
+    try {
+      const emailResult = await sendInquiryReplyEmailViaNodemailer({
+        userEmail: inq.userEmail,
+        userName: inq.userName || 'أستاذنا الفاضل',
+        subject: inq.subject || 'استفسار ودعم فني',
+        originalMessage: inq.message || '',
+        adminReply: replyText,
+        isSOS: Boolean(inq.isSOS)
+      });
+      emailSent = emailResult.success;
+      emailError = emailResult.error;
+    } catch (err: any) {
+      console.error('[Inquiry Reply Email Error]:', err);
+      emailError = err?.message || 'فشل إرسال البريد الإلكتروني';
+    }
+  }
+
+  res.json({ 
+    success: true, 
+    inquiry: inq, 
+    emailSent, 
+    emailError,
+    message: shutDownAfter 
+      ? "تم إرسال الرد للبريد الإلكتروني وحساب المستخدم وإغلاق التذكرة بنجاح" 
+      : "تم إرسال الرد للبريد الإلكتروني وحساب الأستاذ بنجاح"
+  });
+};
+
+app.post("/api/admin/inquiries/:id/reply", handleInquiryReply);
+app.post("/api/admin/inquiries/reply", handleInquiryReply);
+
+// Shut down / Close / Reopen an inquiry
+app.post("/api/admin/inquiries/:id/status", (req, res) => {
+  const inquiryId = (req.params.id || '').trim();
+  const { status } = req.body; // 'closed' | 'pending' | 'replied'
+
+  const inq = dbInquiries.get(inquiryId);
+  if (!inq) {
+    return res.status(404).json({ error: "الاستفسار غير موجود" });
+  }
+
+  inq.status = status || 'closed';
+  if (inq.status === 'closed') {
+    inq.closedAt = new Date().toISOString();
+  } else {
+    delete inq.closedAt;
+  }
+  dbInquiries.set(inquiryId, inq);
+
+  res.json({ 
+    success: true, 
+    inquiry: inq,
+    message: inq.status === 'closed' ? "تم إغلاق الرسالة بنجاح" : "تم تحديث حالة الرسالة بنجاح"
+  });
+});
+
+app.post("/api/admin/inquiries/:id/shutdown", (req, res) => {
+  const inquiryId = (req.params.id || '').trim();
+  const inq = dbInquiries.get(inquiryId);
+  if (!inq) {
+    return res.status(404).json({ error: "الاستفسار غير موجود" });
+  }
+
+  inq.status = 'closed';
+  inq.closedAt = new Date().toISOString();
+  dbInquiries.set(inquiryId, inq);
+
+  res.json({ success: true, inquiry: inq, message: "تم إيقاف وإغلاق الرسالة بنجاح" });
 });
 
 app.delete("/api/admin/inquiries/:id", (req, res) => {
@@ -1257,7 +1519,143 @@ const handlePricingUpdate = async (req: express.Request, res: express.Response) 
 };
 
 app.put("/api/admin/pricing", handlePricingUpdate);
-app.post("/api/admin/pricing", handlePricingUpdate);
+// User License & Real E-Invoice Details Endpoint
+app.get("/api/user/license-details", async (req, res) => {
+  try {
+    const rawEmail = String(req.query.email || '').trim().toLowerCase();
+    const rawKey = String(req.query.key || '').trim();
+    const requestedPromo = String(req.query.promoCode || '').trim().toUpperCase();
+
+    let user = rawEmail ? dbUsers.get(rawEmail) : null;
+    
+    // Look up license record
+    let license = null;
+    if (rawKey && dbLicenses.has(rawKey)) {
+      license = dbLicenses.get(rawKey);
+    } else if (user?.licenseKey && dbLicenses.has(user.licenseKey)) {
+      license = dbLicenses.get(user.licenseKey);
+    } else if (rawEmail) {
+      for (const lic of dbLicenses.values()) {
+        if ((lic.userEmail && lic.userEmail.toLowerCase() === rawEmail) || 
+            (lic.ownerEmail && lic.ownerEmail.toLowerCase() === rawEmail)) {
+          license = lic;
+          break;
+        }
+      }
+    }
+
+    // Base pricing
+    const basePlanPrice = dbPricingSettings.plans.pro.priceDZD || 3000;
+
+    // Check promo code
+    let promoCode = requestedPromo || license?.promoCode || user?.promoCode || null;
+    let discountPercent = license?.discountPercent || 0;
+    if (promoCode) {
+      const p = dbPromoCodes.get(promoCode);
+      if (p && p.isActive) {
+        discountPercent = p.discountPercent || 10;
+      }
+    }
+
+    // Real amount paid calculation
+    let amountPaid: number;
+    if (requestedPromo && promoCode && discountPercent) {
+      amountPaid = Math.round(basePlanPrice * (1 - discountPercent / 100));
+    } else if (license?.amountDZD !== undefined) {
+      amountPaid = license.amountDZD;
+    } else if (user?.amountPaidDZD !== undefined) {
+      amountPaid = user.amountPaidDZD;
+    } else if (promoCode && discountPercent) {
+      amountPaid = Math.round(basePlanPrice * (1 - discountPercent / 100));
+    } else {
+      amountPaid = basePlanPrice;
+    }
+
+    // Payment date & exact 1-year expiration date
+    const paymentDateStr = license?.issuedAt || user?.createdAt || new Date().toISOString().split('T')[0];
+    const pDate = new Date(paymentDateStr);
+    const validPaymentDate = isNaN(pDate.getTime()) ? new Date() : pDate;
+    
+    // Exactly 1 year after payment date
+    const expDate = new Date(validPaymentDate);
+    expDate.setFullYear(expDate.getFullYear() + 1);
+    const expiresAt = expDate.toISOString().split('T')[0];
+
+    const invoiceNum = license?.invoiceNumber || (license?.id ? `INV-${license.id.replace('lic-', '').toUpperCase().slice(0, 10)}` : `INV-DZ-${validPaymentDate.getFullYear()}-8899`);
+
+    const result = {
+      key: license?.key || user?.licenseKey || 'TC-ALG-PRO-8899-X2K1',
+      plan: license?.plan || user?.licensePlan || 'pro',
+      status: license?.status || user?.licenseStatus || 'active',
+      paymentDate: validPaymentDate.toISOString(),
+      issuedAt: validPaymentDate.toISOString().split('T')[0],
+      expiresAt: expiresAt,
+      amountDZD: amountPaid,
+      originalPriceDZD: basePlanPrice,
+      promoCode: promoCode,
+      discountPercent: discountPercent,
+      paidVia: license?.paidVia || user?.paidVia || 'Chargily Pay v2 (Edahabia/CIB)',
+      maxDevices: 1,
+      invoiceNumber: invoiceNum,
+      orderId: license?.orderId || user?.orderId || null,
+      userName: user?.fullName || license?.userName || 'الأستاذ',
+      userEmail: user?.email || license?.userEmail || rawEmail,
+      schoolName: user?.schoolName || license?.schoolName || '',
+      wilaya: user?.wilaya || license?.wilaya || '16 - الجزائر'
+    };
+
+    return res.json({ success: true, license: result });
+  } catch (err: any) {
+    console.error('Error fetching license details:', err);
+    return res.status(500).json({ error: "Failed to load license details" });
+  }
+});
+
+app.post("/api/user/apply-promo", (req, res) => {
+  const { email, promoCode } = req.body || {};
+  if (!email || !promoCode) {
+    return res.status(400).json({ error: "Email and promo code are required" });
+  }
+  const cleanEmail = String(email).trim().toLowerCase();
+  const code = String(promoCode).trim().toUpperCase();
+  const promo = dbPromoCodes.get(code);
+
+  if (!promo || !promo.isActive || (promo.maxUses && promo.uses >= promo.maxUses) || (promo.expirationDate && new Date(promo.expirationDate) < new Date())) {
+    return res.status(400).json({ error: "رمز التخفيض غير صالح أو انتهت صلاحيته / Invalid or expired promo code" });
+  }
+
+  const basePrice = dbPricingSettings.plans.pro.priceDZD || 3000;
+  const newPrice = Math.round(basePrice * (1 - promo.discountPercent / 100));
+
+  // Update user in dbUsers
+  const user = dbUsers.get(cleanEmail);
+  if (user) {
+    user.promoCode = code;
+    user.discountPercent = promo.discountPercent;
+    user.amountPaidDZD = newPrice;
+    dbUsers.set(cleanEmail, user);
+  }
+
+  // Update in dbLicenses if exists
+  for (const lic of dbLicenses.values()) {
+    if (lic.userEmail?.toLowerCase() === cleanEmail || (user?.licenseKey && lic.key === user.licenseKey)) {
+      lic.promoCode = code;
+      lic.discountPercent = promo.discountPercent;
+      lic.amountDZD = newPrice;
+      dbLicenses.set(lic.key, lic);
+      break;
+    }
+  }
+
+  res.json({
+    success: true,
+    promoCode: code,
+    discountPercent: promo.discountPercent,
+    amountDZD: newPrice,
+    originalPriceDZD: basePrice,
+    message: `تم تطبيق رمز التخفيض بنجاح (${promo.discountPercent}% خصم)!`
+  });
+});
 
 // Licenses & Sales Endpoints
 app.get("/api/admin/licenses", (req, res) => {

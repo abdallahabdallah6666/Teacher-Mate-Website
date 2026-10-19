@@ -17,7 +17,7 @@ export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
 
   const [currentView, setCurrentView] = useState<'landing' | 'hub'>('landing');
-  const [hubInitialTab, setHubInitialTab] = useState<'blog' | 'tutorials' | 'inquiries' | 'license'>('license');
+  const [hubInitialTab, setHubInitialTab] = useState<'license' | 'tutorials' | 'inquiries'>('license');
 
   const [isLoginOpen, setIsLoginOpen] = useState<boolean>(false);
   const [isSignupOpen, setIsSignupOpen] = useState<boolean>(false);
@@ -86,17 +86,19 @@ export default function App() {
     <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-800 selection:bg-teal-500 selection:text-white">
       
       {/* Navigation Header */}
-      <Navbar
-        activeLang={activeLang}
-        onChangeLang={setActiveLang}
-        onNavigateToSection={handleNavigateToSection}
-        currentUser={user}
-        onOpenLogin={handleOpenLogin}
-        onOpenHub={() => {
-          setHubInitialTab('license');
-          setCurrentView(currentView === 'hub' ? 'landing' : 'hub');
-        }}
-      />
+      {!(currentView === 'hub' && user?.role === 'admin') && (
+        <Navbar
+          activeLang={activeLang}
+          onChangeLang={setActiveLang}
+          onNavigateToSection={handleNavigateToSection}
+          currentUser={user}
+          onOpenLogin={handleOpenLogin}
+          onOpenHub={() => {
+            setHubInitialTab('license');
+            setCurrentView(currentView === 'hub' ? 'landing' : 'hub');
+          }}
+        />
+      )}
 
       {/* Main View Router */}
       {currentView === 'hub' && user ? (

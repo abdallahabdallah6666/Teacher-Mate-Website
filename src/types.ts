@@ -31,6 +31,15 @@ export interface UserProfile {
   isFlagged?: boolean;
   flagReason?: string;
   isBlocked?: boolean;
+  amountPaidDZD?: number;
+  originalPriceDZD?: number;
+  promoCode?: string;
+  discountPercent?: number;
+  paidVia?: string;
+  paymentDate?: string;
+  orderId?: string;
+  invoiceNumber?: string;
+  maxDevices?: number;
 }
 
 export interface DesktopFeature {
@@ -102,9 +111,14 @@ export interface LicenseRecord {
   status: 'active' | 'revoked' | 'expired';
   issuedAt: string;
   expiresAt: string;
-  paidVia: 'Chargily Pay v2 (Edahabia/CIB)' | 'BaridiMob / CCP' | 'Manual Admin Issue' | 'Trial Demo';
+  paidVia: 'Chargily Pay v2 (Edahabia/CIB)' | 'BaridiMob / CCP' | 'Manual Admin Issue' | 'Trial Demo' | string;
   amountDZD: number;
   maxDevices: number;
+  promoCode?: string;
+  discountPercent?: number;
+  originalPriceDZD?: number;
+  orderId?: string;
+  invoiceNumber?: string;
 }
 
 export interface SupportInquiry {

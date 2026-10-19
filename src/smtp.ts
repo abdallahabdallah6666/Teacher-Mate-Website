@@ -20,10 +20,10 @@ export const DEFAULT_SMTP_CONFIG: SmtpConfig = {
   host: 'smtp.gmail.com',
   port: 587,
   secure: false,
-  user: 'abdallahbourrich66@gmail.com',
-  pass: '',
+  user: 'teachermatehelp@gmail.com',
+  pass: 'hicl yeie vooq jwxn',
   fromName: 'رفيق المعلم الجزائري - Teacher Mate DZ',
-  fromEmail: 'abdallahbourrich66@gmail.com'
+  fromEmail: 'teachermatehelp@gmail.com'
 };
 
 export function loadSmtpSettings(): SmtpConfig {
@@ -259,3 +259,114 @@ export async function sendLicenseEmailViaNodemailer(params: LicenseEmailParams):
     };
   }
 }
+
+export async function sendResetCodeEmailViaNodemailer(email: string, code: string): Promise<{ success: boolean; error?: string }> {
+  const config = loadSmtpSettings();
+  const subject = `رمز إعادة تعيين كلمة المرور - رفيق المعلم الجزائري`;
+  const text = `مرحباً أستاذنا الفاضل،\n\nرمز إعادة تعيين كلمة المرور الخاص بك هو: ${code}\n\nيرجى استخدامه في التطبيق لإكمال عملية تغيير كلمة المرور.`;
+  const html = `
+    <div dir="rtl" style="font-family: sans-serif; max-width: 500px; margin: 0 auto; padding: 20px;">
+      <h2>إعادة تعيين كلمة المرور</h2>
+      <p>مرحباً أستاذنا الفاضل،</p>
+      <p>رمز إعادة تعيين كلمة المرور الخاص بك هو:</p>
+      <div style="font-size: 24px; font-weight: bold; color: #0d9488; text-align: center; padding: 15px; border: 2px dashed #0d9488; margin: 20px 0;">
+        ${code}
+      </div>
+      <p>يرجى استخدامه في التطبيق لإكمال عملية تغيير كلمة المرور.</p>
+    </div>
+  `;
+
+  if (!config.pass || !config.pass.trim()) {
+    return { success: false, error: 'SMTP not configured' };
+  }
+
+  try {
+    const transporter = createSmtpTransporter(config);
+    await transporter.sendMail({
+      from: `"${config.fromName}" <${config.fromEmail || config.user}>`,
+      to: email,
+      subject,
+      text,
+      html
+    });
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function sendInquiryReplyEmailViaNodemailer(params: {
+  userEmail: string;
+  userName: string;
+  subject: string;
+  originalMessage: string;
+  adminReply: string;
+  isSOS?: boolean;
+}): Promise<{ success: boolean; error?: string }> {
+  const config = loadSmtpSettings();
+  const subject = `${params.isSOS ? '🚨 [رد عاجل SOS] ' : 'رد الدعم الفني: '}${params.subject} - رفيق المعلم الجزائري`;
+  const text = `مرحباً الأستاذ(ة) ${params.userName || ''}،\n\nنحيطكم علماً بأنه قد تم الرد على استفساركم: "${params.subject}"\n\nرد الإدارة الفنية:\n${params.adminReply}\n\nرسالتكم الأصلية:\n${params.originalMessage}\n\nيمكنكم أيضاً متابعة استفساراتكم عبر بوابة الموقع في قسم الاستفسارات.\n\nمع أطيب التحيات،\nفريق الدعم الفني - رفيق المعلم الجزائري`;
+
+  const html = `
+    <div dir="rtl" style="font-family: Arial, Tahoma, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff; color: #1e293b;">
+      <div style="text-align: center; border-bottom: 2px solid #0d9488; padding-bottom: 16px; margin-bottom: 20px;">
+        <h2 style="color: #0d9488; margin: 0 0 6px 0; font-size: 22px;">رفيق المعلم الجزائري</h2>
+        <span style="display: inline-block; background: #f0fdf4; color: #0d9488; font-weight: bold; font-size: 12px; padding: 3px 10px; border-radius: 6px; border: 1px solid #ccfbf1;">
+          إشعار بالرد على الاستفسار ${params.isSOS ? '• بلاغ طوارئ SOS' : ''}
+        </span>
+      </div>
+
+      <p style="font-size: 15px; margin: 0 0 16px 0;">
+        تحية طيبة الأستاذ(ة) <strong>${params.userName || 'الفاضل(ة)'}</strong>،
+      </p>
+
+      <p style="font-size: 14px; line-height: 1.6; color: #334155; margin: 0 0 16px 0;">
+        تمت معالجة استفساركم بخصوص: <strong style="color: #0f172a;">${params.subject}</strong>
+      </p>
+
+      <div style="background: #f0fdf4; border-right: 4px solid #0d9488; padding: 16px; border-radius: 8px; margin: 20px 0;">
+        <div style="font-weight: bold; color: #0d9488; font-size: 14px; margin-bottom: 8px;">
+          رد المشرف الفني (Admin Technical Response):
+        </div>
+        <div style="font-size: 14px; line-height: 1.8; color: #0f172a; white-space: pre-wrap;">${params.adminReply}</div>
+      </div>
+
+      <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 14px; border-radius: 8px; margin: 20px 0;">
+        <div style="font-weight: bold; color: #64748b; font-size: 12px; margin-bottom: 6px;">
+          نص استفساركم الأصلي:
+        </div>
+        <div style="font-size: 13px; color: #475569; line-height: 1.6; white-space: pre-wrap;">${params.originalMessage}</div>
+      </div>
+
+      <p style="font-size: 13px; color: #64748b; line-height: 1.6; margin: 20px 0 0 0;">
+        تم تسجيل هذا الرد أيضاً في حسابكم على الموقع في تبويب <strong>"الاستفسارات والدعم الفني"</strong> للرجوع إليه في أي وقت.
+      </p>
+
+      <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #f1f5f9; text-align: center; font-size: 12px; color: #94a3b8;">
+        فريق رفيق المعلم الجزائري • رفيقك الرقمي للنجاح
+      </div>
+    </div>
+  `;
+
+  if (!config.pass || !config.pass.trim()) {
+    console.warn('[SMTP] No password configured, skipping direct SMTP delivery');
+    return { success: false, error: 'SMTP password not configured' };
+  }
+
+  try {
+    const transporter = createSmtpTransporter(config);
+    await transporter.sendMail({
+      from: `"${config.fromName}" <${config.fromEmail || config.user}>`,
+      to: params.userEmail,
+      subject,
+      text,
+      html
+    });
+    console.log(`[SMTP] Successfully emailed inquiry reply to ${params.userEmail}`);
+    return { success: true };
+  } catch (err: any) {
+    console.error(`[SMTP] Error sending inquiry reply to ${params.userEmail}:`, err?.message || err);
+    return { success: false, error: err?.message || 'SMTP delivery failed' };
+  }
+}
+

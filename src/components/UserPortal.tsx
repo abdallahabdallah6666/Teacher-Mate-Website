@@ -212,7 +212,7 @@ export const UserPortal: React.FC<UserPortalProps> = ({
                     {isAr ? 'تحميل تطبيق "رفيق المعلم" لسطح المكتب (v2.4.0)' : 'Télécharger Teacher Companion v2.4.0'}
                   </h3>
                   <p className="text-xs text-slate-500">
-                    {isAr ? 'يعمل أوفلاين 100% دون الحاجة إلى إنترنت بعد التثبيت والتفعيل الأول' : 'Fonctionne à 100% Hors-ligne'}
+                    {isAr ? 'برنامج متكامل لسطح المكتب مخصص لأساتذة التعليم الابتدائي' : 'Application complète pour enseignants du primaire'}
                   </p>
                 </div>
                 <span className="px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold rounded-md">
@@ -309,16 +309,16 @@ export const UserPortal: React.FC<UserPortalProps> = ({
               </div>
             </div>
 
-            {/* Offline Activation Quick Guide */}
+            {/* Activation Quick Guide */}
             <div className="bg-[#F8FAFC] p-5 rounded-lg border border-slate-200 space-y-3 text-xs text-slate-700">
               <div className="flex items-center gap-2 font-bold text-[#1E3A8A] text-sm">
                 <ShieldCheck className="w-4 h-4 text-[#0D9488]" />
-                <span>كيفية تفعيل البرنامج أوفلاين في المدرسة:</span>
+                <span>خطوات تنصيب وتفعيل البرنامج:</span>
               </div>
-              <p>1. قم بتنصيب تطبيق "Teacher Companion" على حاسوبك الشخصي أو حاسوب القسم.</p>
+              <p>1. قم بتنصيب تطبيق "Teacher Companion" على حاسوبك الشخصي.</p>
               <p>2. افتح التطبيق، واضغط على خيار "تفعيل الرخصة".</p>
               <p>3. أدخل مفتاح التفعيل الخاص بك الظاهر في تبويب "مفتاح التفعيل والتراخيص".</p>
-              <p>4. سيتعرّف التطبيق على الرخصة ويحفظ ملف التفعيل المحلي فورياً ويعمل للأبد بدون حاجتك للإنترنت.</p>
+              <p>4. سيتعرّف التطبيق على الرخصة ويتم تفعيلها بنجاح للاستخدام السنوي الكامل.</p>
             </div>
           </div>
         )}
@@ -331,7 +331,7 @@ export const UserPortal: React.FC<UserPortalProps> = ({
                 {isAr ? 'مفتاح التفعيل المرتبط بحسابك' : 'Votre Clé d\'Activation Active'}
               </h3>
               <p className="text-xs text-slate-500">
-                {isAr ? 'مفتاح تسلسلي يتكون من 16 رمزا مخصصا لتنشيط البرنامج أوفلاين' : 'Clé de licence à 16 caractères pour l\'activation de l\'application PC'}
+                {isAr ? 'مفتاح تسلسلي يتكون من 16 رمزا مخصصا لتنشيط البرنامج' : 'Clé de licence à 16 caractères pour l\'activation de l\'application PC'}
               </p>
             </div>
 
@@ -374,11 +374,13 @@ export const UserPortal: React.FC<UserPortalProps> = ({
                 </div>
                 <div>
                   <span className="text-slate-500 block">تاريخ الانتهاء:</span>
-                  <span className="font-bold text-slate-800">01 سبتمبر 2027</span>
+                  <span className="font-bold text-slate-800">
+                    {user.expiresAt || (user.createdAt ? new Date(new Date(user.createdAt).getTime() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] : '2027-01-10')}
+                  </span>
                 </div>
                 <div>
                   <span className="text-slate-500 block">الأجهزة المسموحة:</span>
-                  <span className="font-bold text-slate-800">حاسوبان (2 PCs)</span>
+                  <span className="font-bold text-slate-800">حاسوب شخصي واحد (1 PC)</span>
                 </div>
               </div>
 
@@ -491,9 +493,16 @@ export const UserPortal: React.FC<UserPortalProps> = ({
                     <div key={inq.id} className="bg-white border border-slate-200 rounded-lg p-5 space-y-3 shadow-sm">
                       <div className="flex justify-between items-start gap-4">
                         <div>
-                          <span className="text-[10px] px-2 py-0.5 bg-blue-50 text-[#1E3A8A] border border-blue-200 font-bold rounded">
-                            {inq.category}
-                          </span>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {inq.isSOS && (
+                              <span className="text-[10px] px-2 py-0.5 bg-red-100 text-red-700 border border-red-300 font-black rounded animate-pulse">
+                                🚨 بلاغ طوارئ SOS
+                              </span>
+                            )}
+                            <span className="text-[10px] px-2 py-0.5 bg-blue-50 text-[#1E3A8A] border border-blue-200 font-bold rounded">
+                              {inq.category}
+                            </span>
+                          </div>
                           <h4 className="text-sm font-bold text-[#1E3A8A] mt-1">{inq.subject}</h4>
                           <p className="text-[11px] text-slate-500">
                             تاريخ الإرسال: {new Date(inq.createdAt).toLocaleDateString('ar-DZ')}
@@ -503,9 +512,11 @@ export const UserPortal: React.FC<UserPortalProps> = ({
                         <span className={`px-2.5 py-1 text-[11px] font-bold rounded border ${
                           inq.status === 'replied'
                             ? 'bg-teal-50 border-teal-200 text-[#0D9488]'
+                            : inq.status === 'closed'
+                            ? 'bg-slate-100 border-slate-300 text-slate-600'
                             : 'bg-amber-50 border-amber-200 text-amber-800'
                         }`}>
-                          {inq.status === 'replied' ? 'تم الرد' : 'قيد المراجعة'}
+                          {inq.status === 'replied' ? 'تم الرد' : inq.status === 'closed' ? 'مغلق' : 'قيد المراجعة'}
                         </span>
                       </div>
 

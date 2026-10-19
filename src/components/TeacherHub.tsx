@@ -1,12 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import {
-  BookOpen,
   Video,
   HelpCircle,
   AlertTriangle,
   Send,
-  ThumbsUp,
-  Sparkles,
   MessageSquare,
   Key,
   CheckCircle,
@@ -17,39 +14,57 @@ import {
   Play,
   FileText,
   RefreshCw,
-  LogOut
+  LogOut,
+  Tag,
+  Copy,
+  Check,
+  CreditCard,
+  Calendar
 } from 'lucide-react';
-import { UserProfile, BlogPost, TutorialVideo, SupportInquiry } from '../types';
+import { UserProfile, TutorialVideo, SupportInquiry } from '../types';
 import { Language } from './Navbar';
+
+export interface RealLicenseDetails {
+  key: string;
+  plan: string;
+  status: string;
+  paymentDate: string;
+  issuedAt: string;
+  expiresAt: string;
+  amountDZD: number;
+  originalPriceDZD?: number;
+  promoCode?: string;
+  discountPercent?: number;
+  paidVia: string;
+  maxDevices: number;
+  invoiceNumber: string;
+  orderId?: string;
+  userName: string;
+  userEmail: string;
+  schoolName?: string;
+  wilaya?: string;
+}
 
 interface TeacherHubProps {
   lang: Language;
   currentUser: UserProfile;
-  initialTab?: 'blog' | 'tutorials' | 'inquiries' | 'license';
+  initialTab?: 'license' | 'tutorials' | 'inquiries';
   onLogout: () => void;
 }
 
 export const TeacherHub: React.FC<TeacherHubProps> = ({
   lang,
   currentUser,
-  initialTab = 'blog',
+  initialTab = 'license',
   onLogout,
 }) => {
-  const [activeTab, setActiveTab] = useState<'blog' | 'tutorials' | 'inquiries' | 'license'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'license' | 'tutorials' | 'inquiries'>(initialTab);
 
   useEffect(() => {
     if (initialTab) {
       setActiveTab(initialTab);
     }
   }, [initialTab]);
-
-  // Blog states
-  const [posts, setPosts] = useState<BlogPost[]>([]);
-  const [selectedPost, setSelectedPost] = useState<BlogPost | null>(null);
-  const [commentText, setCommentText] = useState<string>('');
-  const [blogSearch, setBlogSearch] = useState<string>('');
-  const [blogCategory, setBlogCategory] = useState<string>('all');
-  const [submittingComment, setSubmittingComment] = useState<boolean>(false);
 
   // Tutorials states
   const [tutorials, setTutorials] = useState<TutorialVideo[]>([]);
@@ -65,27 +80,20 @@ export const TeacherHub: React.FC<TeacherHubProps> = ({
   const [submittingInquiry, setSubmittingInquiry] = useState<boolean>(false);
   const [inquirySuccessMsg, setInquirySuccessMsg] = useState<string | null>(null);
 
+  // License & E-Invoice details state
+  const [licenseDetails, setLicenseDetails] = useState<RealLicenseDetails | null>(null);
+  const [loadingLicense, setLoadingLicense] = useState<boolean>(false);
+  const [promoInput, setPromoInput] = useState<string>('');
+  const [applyingPromo, setApplyingPromo] = useState<boolean>(false);
+  const [promoFeedback, setPromoFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [copiedKey, setCopiedKey] = useState<boolean>(false);
+
   // Load initial data
   useEffect(() => {
-    fetchBlogPosts();
     fetchTutorials();
     fetchInquiries();
+    fetchLicenseDetails();
   }, [currentUser]);
-
-  const fetchBlogPosts = async () => {
-    try {
-      const res = await fetch('/api/blog/posts');
-      if (!res.ok) return;
-      const ct = res.headers.get('content-type');
-      if (!ct || !ct.includes('application/json')) return;
-      const json = await res.json();
-      if (json.posts) {
-        setPosts(json.posts);
-      }
-    } catch (e) {
-      console.error('Failed to load blog posts', e);
-    }
-  };
 
   const fetchTutorials = async () => {
     try {
@@ -120,52 +128,62 @@ export const TeacherHub: React.FC<TeacherHubProps> = ({
     }
   };
 
-  // Blog Actions
-  const handleReactToPost = async (postId: string, type: 'like' | 'helpful') => {
+  const fetchLicenseDetails = async (optionalPromo?: string) => {
+    setLoadingLicense(true);
     try {
-      const res = await fetch(`/api/blog/posts/${postId}/react`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type })
-      });
+      const promoQuery = optionalPromo ? `&promoCode=${encodeURIComponent(optionalPromo)}` : '';
+      const res = await fetch(`/api/user/license-details?email=${encodeURIComponent(currentUser.email)}${promoQuery}`);
+      if (!res.ok) return;
+      const ct = res.headers.get('content-type');
+      if (!ct || !ct.includes('application/json')) return;
       const json = await res.json();
-      if (json.post) {
-        setPosts(prev => prev.map(p => p.id === postId ? json.post : p));
-        if (selectedPost && selectedPost.id === postId) {
-          setSelectedPost(json.post);
-        }
+      if (json.license) {
+        setLicenseDetails(json.license);
       }
-    } catch (e) {
-      console.error(e);
+    } catch (err) {
+      console.error('Failed to load real license details', err);
+    } finally {
+      setLoadingLicense(false);
     }
   };
 
-  const handleAddComment = async (e: React.FormEvent) => {
+  const handleApplyPromo = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedPost || !commentText.trim()) return;
-
-    setSubmittingComment(true);
+    if (!promoInput.trim()) return;
+    setApplyingPromo(true);
+    setPromoFeedback(null);
     try {
-      const res = await fetch(`/api/blog/posts/${selectedPost.id}/comments`, {
+      const res = await fetch('/api/user/apply-promo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userName: currentUser.fullName,
-          userRole: `أستاذ لغة إنجليزية (${currentUser.primaryGrade || 'ابتدائي'})`,
-          userWilaya: currentUser.wilaya,
-          content: commentText
+          email: currentUser.email,
+          promoCode: promoInput.trim()
         })
       });
-      const json = await res.json();
-      if (json.post) {
-        setSelectedPost(json.post);
-        setPosts(prev => prev.map(p => p.id === selectedPost.id ? json.post : p));
-        setCommentText('');
+      const data = await res.json();
+      if (res.ok) {
+        setPromoFeedback({
+          type: 'success',
+          message: lang === 'en' 
+            ? `Promo code "${data.promoCode}" applied! Real price updated to ${data.amountDZD} DZD.`
+            : `تم تطبيق رمز التخفيض "${data.promoCode}" بنجاح! تم تحديث المبلغ إلى ${data.amountDZD} دج.`
+        });
+        await fetchLicenseDetails(data.promoCode);
+        setPromoInput('');
+      } else {
+        setPromoFeedback({
+          type: 'error',
+          message: data.error || (lang === 'en' ? 'Invalid promo code' : 'كوبون تخفيض غير صالح')
+        });
       }
-    } catch (e) {
-      console.error(e);
+    } catch (err: any) {
+      setPromoFeedback({
+        type: 'error',
+        message: err?.message || (lang === 'en' ? 'Failed to apply promo code' : 'فشل تطبيق رمز التخفيض')
+      });
     } finally {
-      setSubmittingComment(false);
+      setApplyingPromo(false);
     }
   };
 
@@ -207,14 +225,6 @@ export const TeacherHub: React.FC<TeacherHubProps> = ({
       setSubmittingInquiry(false);
     }
   };
-
-  // Filtered Blog Posts
-  const filteredPosts = posts.filter(post => {
-    const matchesSearch = post.titleAr.toLowerCase().includes(blogSearch.toLowerCase()) ||
-                          post.excerptAr.toLowerCase().includes(blogSearch.toLowerCase());
-    const matchesCat = blogCategory === 'all' || post.category === blogCategory;
-    return matchesSearch && matchesCat;
-  });
 
   // Filtered Tutorials
   const filteredTutorials = tutorials.filter(tut => {
@@ -263,16 +273,16 @@ export const TeacherHub: React.FC<TeacherHubProps> = ({
         {/* Hub Navigation Tabs */}
         <div className="flex border-b border-slate-200 bg-white rounded-xl shadow-sm p-1.5 overflow-x-auto">
           <button
-            onClick={() => setActiveTab('blog')}
+            onClick={() => setActiveTab('license')}
             className={`flex items-center gap-2 px-5 py-3 rounded-lg text-xs font-extrabold transition-all whitespace-nowrap ${
-              activeTab === 'blog'
+              activeTab === 'license'
                 ? 'bg-[#0D9488] text-white shadow-sm'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
             }`}
           >
-            <BookOpen className="w-4 h-4" />
+            <Key className="w-4 h-4" />
             <span>
-              {lang === 'ar' ? 'المدونة والمجتمع البيداغوجي' : 'Blog & Community'}
+              {lang === 'ar' ? 'الرخصة الرسمية والفاتورة الإلكترونية' : 'Official License & E-Invoice'}
             </span>
           </button>
 
@@ -306,241 +316,7 @@ export const TeacherHub: React.FC<TeacherHubProps> = ({
               <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
             )}
           </button>
-
-          <button
-            onClick={() => setActiveTab('license')}
-            className={`flex items-center gap-2 px-5 py-3 rounded-lg text-xs font-extrabold transition-all whitespace-nowrap ${
-              activeTab === 'license'
-                ? 'bg-[#0D9488] text-white shadow-sm'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <Key className="w-4 h-4" />
-            <span>
-              {lang === 'ar' ? 'الرخصة الرسمية' : 'Official License'}
-            </span>
-          </button>
         </div>
-
-        {/* TAB 1: BLOG SYSTEM (Post, React, Comment) */}
-        {activeTab === 'blog' && (
-          <div className="space-y-6">
-            
-            {/* If Post Selected for Reading */}
-            {selectedPost ? (
-              <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-sm space-y-6 animate-fadeIn">
-                <button
-                  onClick={() => setSelectedPost(null)}
-                  className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-[#1E3A8A] text-xs font-extrabold rounded-md flex items-center gap-2 transition-colors"
-                >
-                  ← {lang === 'en' ? 'Back to articles' : 'العودة لقائمة المقالات'}
-                </button>
-
-                <div className="space-y-3">
-                  <span className="px-3 py-1 bg-teal-50 text-[#0D9488] border border-teal-200 text-xs font-extrabold rounded-full">
-                    {selectedPost.category}
-                  </span>
-                  <h2 className="text-2xl sm:text-3xl font-extrabold text-[#1E3A8A] leading-tight">
-                    {lang === 'en' ? (selectedPost.titleEn || selectedPost.titleAr) : selectedPost.titleAr}
-                  </h2>
-                  <div className="flex items-center gap-4 text-xs text-slate-500 pt-1 border-b border-slate-100 pb-4">
-                    <span>{selectedPost.author}</span>
-                    <span>•</span>
-                    <span>{selectedPost.publishDate}</span>
-                    <span>•</span>
-                    <span>{selectedPost.readTime}</span>
-                  </div>
-                </div>
-
-                <div className="rounded-xl overflow-hidden max-h-80 bg-slate-100 border border-slate-200">
-                  <img
-                    src={selectedPost.imageUrl}
-                    alt={selectedPost.titleAr}
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-
-                {/* Content body */}
-                <div className="prose max-w-none text-slate-700 leading-relaxed text-sm whitespace-pre-line space-y-4 font-normal">
-                  {lang === 'en' ? (selectedPost.contentEn || selectedPost.contentAr) : selectedPost.contentAr}
-                </div>
-
-                {/* Reactions section */}
-                <div className="pt-6 border-t border-slate-200 flex items-center justify-between flex-wrap gap-4">
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => handleReactToPost(selectedPost.id, 'like')}
-                      className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-[#1E3A8A] text-xs font-bold rounded-lg border border-blue-200 flex items-center gap-2 transition-all"
-                    >
-                      <ThumbsUp className="w-4 h-4 text-[#1E3A8A]" />
-                      <span>{lang === 'ar' ? 'أعجبني' : 'Like'} ({selectedPost.likesCount || 0})</span>
-                    </button>
-
-                    <button
-                      onClick={() => handleReactToPost(selectedPost.id, 'helpful')}
-                      className="px-4 py-2 bg-teal-50 hover:bg-teal-100 text-[#0D9488] text-xs font-bold rounded-lg border border-teal-200 flex items-center gap-2 transition-all"
-                    >
-                      <Sparkles className="w-4 h-4 text-[#0D9488]" />
-                      <span>{lang === 'ar' ? 'مقال مفيد جداً' : 'Helpful Article'} ({selectedPost.helpfulCount || 0})</span>
-                    </button>
-                  </div>
-
-                  <div className="text-xs text-slate-500 font-bold flex items-center gap-1.5">
-                    <MessageSquare className="w-4 h-4 text-slate-400" />
-                    <span>{selectedPost.comments?.length || 0} {lang === 'ar' ? 'تعليقات ومناقشات' : 'Comments'}</span>
-                  </div>
-                </div>
-
-                {/* Comments Section */}
-                <div className="pt-6 border-t border-slate-200 space-y-6">
-                  <h3 className="text-lg font-extrabold text-[#1E3A8A] flex items-center gap-2">
-                    <MessageSquare className="w-5 h-5 text-[#0D9488]" />
-                    <span>{lang === 'ar' ? 'مناقشات الأساتذة وآراؤهم' : 'Teacher Discussions & Feedback'}</span>
-                  </h3>
-
-                  {/* Add Comment Form */}
-                  <form onSubmit={handleAddComment} className="bg-slate-50 p-4 border border-slate-200 rounded-xl space-y-3">
-                    <label className="block text-xs font-bold text-slate-700">
-                      {lang === 'ar' ? 'أضف رأيك أو استفسارك البيداغوجي حول هذا الموضوع:' : 'Share your feedback or pedagogical question:'}
-                    </label>
-                    <textarea
-                      rows={3}
-                      required
-                      value={commentText}
-                      onChange={(e) => setCommentText(e.target.value)}
-                      placeholder={lang === 'ar' ? 'اكتب تعليقك هنا...' : 'Write your comment here...'}
-                      className="w-full bg-white border border-slate-200 rounded-lg p-3 text-xs text-slate-800 focus:outline-none focus:border-[#0D9488]"
-                    />
-                    <div className="flex justify-end">
-                      <button
-                        type="submit"
-                        disabled={submittingComment}
-                        className="px-5 py-2 bg-[#0D9488] hover:bg-teal-700 text-white font-extrabold text-xs rounded-lg shadow-sm flex items-center gap-2 transition-all"
-                      >
-                        <Send className="w-3.5 h-3.5" />
-                        <span>{submittingComment ? (lang === 'ar' ? 'جاري النشر...' : 'Publishing...') : (lang === 'ar' ? 'نشر التعليق' : 'Publish')}</span>
-                      </button>
-                    </div>
-                  </form>
-
-                  {/* Comments List */}
-                  <div className="space-y-3">
-                    {selectedPost.comments && selectedPost.comments.length > 0 ? (
-                      selectedPost.comments.map((comment) => (
-                        <div key={comment.id} className="p-4 bg-white border border-slate-200 rounded-xl space-y-1.5 shadow-2xs">
-                          <div className="flex items-center justify-between text-xs">
-                            <div className="flex items-center gap-2 font-extrabold text-[#1E3A8A]">
-                              <User className="w-3.5 h-3.5 text-[#0D9488]" />
-                              <span>{comment.userName}</span>
-                              <span className="text-[10px] font-normal text-slate-500">({comment.userWilaya || comment.userRole})</span>
-                            </div>
-                            <span className="text-[10px] text-slate-400">{comment.createdAt}</span>
-                          </div>
-                          <p className="text-xs text-slate-700 leading-relaxed font-normal pt-1">
-                            {comment.content}
-                          </p>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-xs text-slate-500 italic py-2">
-                        {lang === 'ar' ? 'لا توجد تعليقات بعد. كن أول من يضيف تعليقاً!' : 'No comments yet. Be the first to comment!'}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-              </div>
-            ) : (
-              /* Posts Directory */
-              <div className="space-y-6">
-                
-                {/* Search and Category Filter Bar */}
-                <div className="bg-white p-4 border border-slate-200 rounded-xl shadow-xs flex flex-col md:flex-row items-center gap-4 justify-between">
-                  <div className="relative w-full md:w-80">
-                    <Search className="w-4 h-4 text-slate-400 absolute top-3 left-3 rtl:right-3 rtl:left-auto pointer-events-none" />
-                    <input
-                      type="text"
-                      value={blogSearch}
-                      onChange={(e) => setBlogSearch(e.target.value)}
-                      placeholder={lang === 'ar' ? 'البحث في المقالات والإرشادات...' : 'Search articles and guides...'}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-9 pr-3 rtl:pr-9 rtl:pl-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-[#0D9488]"
-                    />
-                  </div>
-
-                  <div className="flex items-center gap-2 overflow-x-auto w-full md:w-auto pb-1 md:pb-0">
-                    {['all', 'تدريس الإنجليزية', 'تقييم المكتسبات', 'تحديثات التطبيق'].map((cat) => (
-                      <button
-                        key={cat}
-                        onClick={() => setBlogCategory(cat)}
-                        className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all whitespace-nowrap ${
-                          blogCategory === cat
-                            ? 'bg-[#1E3A8A] text-white'
-                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                        }`}
-                      >
-                        {cat === 'all' ? (lang === 'ar' ? 'الكل' : 'All') : 
-                         cat === 'تدريس الإنجليزية' ? (lang === 'ar' ? cat : 'English Teaching') :
-                         cat === 'تقييم المكتسبات' ? (lang === 'ar' ? cat : 'Competency Assessment') :
-                         cat === 'تحديثات التطبيق' ? (lang === 'ar' ? cat : 'App Updates') : cat}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Posts Cards Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {filteredPosts.map((post) => (
-                    <div
-                      key={post.id}
-                      onClick={() => setSelectedPost(post)}
-                      className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs hover:shadow-md transition-all cursor-pointer flex flex-col justify-between group"
-                    >
-                      <div>
-                        <div className="h-44 overflow-hidden bg-slate-100 relative">
-                          <img
-                            src={post.imageUrl}
-                            alt={post.titleAr}
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                          />
-                          <span className="absolute top-3 right-3 rtl:left-3 rtl:right-auto px-2.5 py-1 bg-[#1E3A8A] text-white text-[10px] font-extrabold rounded-md shadow-sm">
-                            {post.category}
-                          </span>
-                        </div>
-
-                        <div className="p-5 space-y-2">
-                          <h3 className="text-base font-extrabold text-[#1E3A8A] group-hover:text-[#0D9488] transition-colors leading-snug line-clamp-2">
-                            {lang === 'en' ? (post.titleEn || post.titleAr) : post.titleAr}
-                          </h3>
-                          <p className="text-xs text-slate-600 leading-relaxed line-clamp-3 font-normal">
-                            {lang === 'en' ? (post.excerptEn || post.excerptAr) : post.excerptAr}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="p-5 pt-0 border-t border-slate-100 mt-2 flex items-center justify-between text-[11px] text-slate-500">
-                        <div className="flex items-center gap-3">
-                          <span className="flex items-center gap-1">
-                            <ThumbsUp className="w-3.5 h-3.5 text-[#0D9488]" />
-                            {post.likesCount || 0}
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <MessageSquare className="w-3.5 h-3.5 text-slate-400" />
-                            {post.comments?.length || 0}
-                          </span>
-                        </div>
-                        <span className="font-extrabold text-[#0D9488]">
-                          {lang === 'ar' ? 'اقرأ المقال ←' : 'Read Article →'}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-              </div>
-            )}
-
-          </div>
-        )}
 
         {/* TAB 2: TUTORIALS SECTION */}
         {activeTab === 'tutorials' && (
@@ -725,8 +501,8 @@ export const TeacherHub: React.FC<TeacherHubProps> = ({
                         </span>
                         <p className="text-[11px] text-slate-600 leading-tight">
                           {lang === 'ar'
-                            ? 'حدد هذا الخيار إذا كان لديك مشكلة طارئة في تفعيل الرخصة قبل زيارة المفتش أو خافش الدرس.'
-                            : 'Select this option if you have an urgent offline key issue before an inspection visit.'}
+                            ? 'حدد هذا الخيار إذا كان لديك مشكلة طارئة في تفعيل الرخصة تحتاج معالجة عاجلة.'
+                            : 'Select this option if you have an urgent license activation issue needing priority resolution.'}
                         </p>
                       </div>
                     </label>
@@ -741,7 +517,7 @@ export const TeacherHub: React.FC<TeacherHubProps> = ({
                       required
                       value={subject}
                       onChange={(e) => setSubject(e.target.value)}
-                      placeholder={lang === 'ar' ? 'مثال: تعذر التفعيل أوفلاين على الحاسوب الثانية' : 'e.g., License activation issue on second PC'}
+                      placeholder={lang === 'ar' ? 'مثال: استفسار حول تفعيل رخصة التطبيق' : 'e.g., Question about app license activation'}
                       className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:border-[#0D9488]"
                     />
                   </div>
@@ -908,107 +684,253 @@ export const TeacherHub: React.FC<TeacherHubProps> = ({
           </div>
         )}
 
-        {/* TAB 4: OFFICIAL LICENSE PANEL (NO DOWNLOAD APP OPTIONS) */}
-        {activeTab === 'license' && (
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-sm space-y-6">
-            
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-              <div>
-                <h3 className="text-xl font-extrabold text-[#1E3A8A] flex items-center gap-2">
-                  <Key className="w-5 h-5 text-[#0D9488]" />
-                  <span>{lang === 'en' ? 'Official App License Details' : 'بيانات الرخصة الرسمية للتطبيق'}</span>
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {lang === 'en' ? 'Your official serial activation key to register the offline desktop app.' : 'هذا هو مفتاح التفعيل التسلسلي الخاص بحسابك لتنشيط تطبيق سطح المكتب أوفلاين.'}
-                </p>
-              </div>
+        {/* TAB 4: OFFICIAL LICENSE & E-INVOICE PANEL */}
+        {activeTab === 'license' && (() => {
+          // Calculate payment date and exact 1-year expiration date
+          const paymentDateRaw = licenseDetails?.paymentDate || licenseDetails?.issuedAt || currentUser.createdAt || new Date().toISOString();
+          const pDate = new Date(paymentDateRaw);
+          const validPaymentDate = isNaN(pDate.getTime()) ? new Date() : pDate;
 
-              <span className="px-3.5 py-1 bg-teal-100 text-[#0D9488] font-extrabold text-xs rounded-full border border-teal-200">
-                {lang === 'en' ? 'Active License (Personal Yearly License)' : 'رخصة مفعلة (الرخصة السنوية الشخصية)'}
-              </span>
-            </div>
+          const expDate = new Date(validPaymentDate);
+          expDate.setFullYear(expDate.getFullYear() + 1);
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          const paymentFormattedEn = validPaymentDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+          const paymentFormattedAr = validPaymentDate.toLocaleDateString('ar-DZ', { year: 'numeric', month: 'long', day: 'numeric' });
+
+          const expiryFormattedEn = expDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) + ' (Full Year)';
+          const expiryFormattedAr = expDate.toLocaleDateString('ar-DZ', { year: 'numeric', month: 'long', day: 'numeric' }) + ' (سنة كاملة)';
+
+          const originalPrice = licenseDetails?.originalPriceDZD || 3000;
+          const activePromoCode = licenseDetails?.promoCode || currentUser.promoCode;
+          const discountPercent = licenseDetails?.discountPercent || (activePromoCode ? 10 : 0);
+          const realPricePaid = licenseDetails?.amountDZD || currentUser.amountPaidDZD || (activePromoCode ? Math.round(originalPrice * (1 - discountPercent / 100)) : originalPrice);
+          const activeKey = licenseDetails?.key || currentUser.licenseKey || 'TC-ALG-PRO-8899-X2K1';
+          const invoiceNum = licenseDetails?.invoiceNumber || (currentUser.invoiceNumber || `INV-DZ-${validPaymentDate.getFullYear()}-8899`);
+
+          return (
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-sm space-y-6">
               
-              {/* License Key Box */}
-              <div className="bg-slate-900 text-white p-6 rounded-2xl space-y-4 shadow-md border border-slate-800">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-                    <Key className="w-3.5 h-3.5 text-teal-400" />
-                    <span>{lang === 'en' ? 'Serial Activation Key (License Key)' : 'مفتاح التفعيل التسلسلي (License Key)'}</span>
-                  </span>
-                  <span className="text-[10px] px-2 py-0.5 bg-teal-900/60 text-teal-300 font-mono rounded">
-                    RSA-2048 Signed
-                  </span>
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                <div>
+                  <h3 className="text-xl font-extrabold text-[#1E3A8A] flex items-center gap-2">
+                    <Key className="w-5 h-5 text-[#0D9488]" />
+                    <span>{lang === 'en' ? 'Official App License & Billing Details' : 'بيانات الرخصة الرسمية والفاتورة الإلكترونية'}</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {lang === 'en' ? 'Your official serial activation key and verified payment invoice for Teacher Companion.' : 'هذا هو مفتاح التفعيل التسلسلي المعتمد والفاتورة الرسمية الخاصة بحسابك في تطبيق رفيق المعلم.'}
+                  </p>
                 </div>
 
-                <div className="flex items-center justify-between bg-slate-800 p-4 rounded-xl border border-slate-700 font-mono text-base sm:text-lg font-extrabold text-teal-300 tracking-wider">
-                  <span>{currentUser.licenseKey || 'TC-ALG-PRO-8899-X2K1'}</span>
+                <div className="flex items-center gap-2">
+                  <span className="px-3.5 py-1 bg-teal-100 text-[#0D9488] font-extrabold text-xs rounded-full border border-teal-200 flex items-center gap-1.5">
+                    <CheckCircle className="w-3.5 h-3.5" />
+                    <span>{lang === 'en' ? 'Active License (1 Year)' : 'رخصة نشطة (سنة كاملة)'}</span>
+                  </span>
                   <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(currentUser.licenseKey || 'TC-ALG-PRO-8899-X2K1');
-                      alert(lang === 'en' ? 'License key copied to clipboard!' : 'تم نسخ المفتاح بنجاح إلى الحافظة!');
-                    }}
-                    className="px-3 py-1.5 bg-[#0D9488] hover:bg-teal-700 text-white text-xs rounded-lg font-sans font-extrabold transition-all shadow-xs"
+                    onClick={() => fetchLicenseDetails()}
+                    className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-600 transition-colors"
+                    title={lang === 'en' ? 'Refresh Billing Data' : 'تحديث البيانات'}
                   >
-                    {lang === 'en' ? 'Copy Key' : 'نسخ المفتاح'}
+                    <RefreshCw className={`w-3.5 h-3.5 ${loadingLicense ? 'animate-spin' : ''}`} />
                   </button>
                 </div>
-
-                <div className="space-y-1.5 text-xs text-slate-300 pt-1 border-t border-slate-800">
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">{lang === 'en' ? 'Allowed Devices:' : 'عدد الحواسيب المسموحة:'}</span>
-                    <span className="font-bold text-white">{lang === 'en' ? '3 PCs / USB Flash Drives' : '3 حواسيب شخصية / فلاش ديسك'}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">{lang === 'en' ? 'Expiration Date:' : 'تاريخ انتهاء الصلاحية:'}</span>
-                    <span className="font-bold text-teal-300">{lang === 'en' ? 'September 01, 2027 (Full Year)' : '01 سبتمبر 2027 (سنة كاملة)'}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">{lang === 'en' ? 'Activation Mode:' : 'نوع التفعيل:'}</span>
-                    <span className="font-bold text-white">{lang === 'en' ? '100% Offline (No Internet Required)' : 'أوفلاين 100% بدون إنترنت'}</span>
-                  </div>
-                </div>
               </div>
 
-              {/* Order & Payment Info */}
-              <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 space-y-4">
-                <h4 className="text-xs font-extrabold text-[#1E3A8A] uppercase tracking-wider flex items-center gap-2 border-b border-slate-200 pb-2">
-                  <ShieldCheck className="w-4 h-4 text-[#0D9488]" />
-                  <span>{lang === 'en' ? 'Payment & E-Invoice Details' : 'تفاصيل عملية الدفع والفاتورة الإلكترونية'}</span>
-                </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                
+                {/* License Key Box */}
+                <div className="bg-slate-900 text-white p-6 rounded-2xl space-y-4 shadow-md border border-slate-800 flex flex-col justify-between">
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                        <Key className="w-3.5 h-3.5 text-teal-400" />
+                        <span>{lang === 'en' ? 'Serial Activation Key' : 'مفتاح التفعيل التسلسلي (License Key)'}</span>
+                      </span>
+                      <span className="text-[10px] px-2 py-0.5 bg-teal-900/60 text-teal-300 font-mono rounded">
+                        RSA-2048 Signed
+                      </span>
+                    </div>
 
-                <div className="space-y-2.5 text-xs text-slate-700 font-medium">
-                  <div className="flex justify-between border-b border-slate-200/60 pb-2">
-                    <span className="text-slate-500">{lang === 'en' ? 'Payment Gateway:' : 'بوابة الدفع الإلكتروني:'}</span>
-                    <span className="font-extrabold text-[#0D9488]">Chargily Pay v2 (Edahabia / CIB)</span>
+                    <div className="flex items-center justify-between bg-slate-800 p-4 rounded-xl border border-slate-700 font-mono text-base sm:text-lg font-extrabold text-teal-300 tracking-wider">
+                      <span className="break-all">{activeKey}</span>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(activeKey);
+                          setCopiedKey(true);
+                          setTimeout(() => setCopiedKey(false), 2500);
+                        }}
+                        className="px-3 py-1.5 bg-[#0D9488] hover:bg-teal-700 text-white text-xs rounded-lg font-sans font-extrabold transition-all shadow-xs shrink-0 flex items-center gap-1.5 ml-2"
+                      >
+                        {copiedKey ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-white" />
+                            <span>{lang === 'en' ? 'Copied!' : 'تم النسخ!'}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>{lang === 'en' ? 'Copy Key' : 'نسخ المفتاح'}</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    <div className="space-y-2 text-xs text-slate-300 pt-2 border-t border-slate-800">
+                      {/* Allowed Devices: changed to 1 */}
+                      <div className="flex justify-between items-center py-1 border-b border-slate-800/60">
+                        <span className="text-slate-400">{lang === 'en' ? 'Allowed Devices:' : 'عدد الحواسيب المسموحة:'}</span>
+                        <span className="font-extrabold text-white bg-slate-800 px-2.5 py-0.5 rounded-md border border-slate-700">
+                          {lang === 'en' ? '1 PC (Personal Computer)' : 'حاسوب شخصي واحد (1 PC)'}
+                        </span>
+                      </div>
+
+                      {/* Expiration Date: Exactly 1 year after payment date */}
+                      <div className="flex justify-between items-center py-1 border-b border-slate-800/60">
+                        <span className="text-slate-400">{lang === 'en' ? 'Expiration Date:' : 'تاريخ انتهاء الصلاحية:'}</span>
+                        <span className="font-extrabold text-teal-300 font-mono">
+                          {lang === 'en' ? expiryFormattedEn : expiryFormattedAr}
+                        </span>
+                      </div>
+
+                      {/* Payment Date */}
+                      <div className="flex justify-between items-center py-1 border-b border-slate-800/60">
+                        <span className="text-slate-400">{lang === 'en' ? 'Payment Date:' : 'تاريخ عملية الدفع:'}</span>
+                        <span className="font-bold text-slate-300 font-mono">
+                          {lang === 'en' ? paymentFormattedEn : paymentFormattedAr}
+                        </span>
+                      </div>
+
+                      {/* Plan Duration */}
+                      <div className="flex justify-between items-center py-1">
+                        <span className="text-slate-400">{lang === 'en' ? 'Plan Duration:' : 'فترة الصلاحية:'}</span>
+                        <span className="font-bold text-white">
+                          {lang === 'en' ? '12 Months (1 Full Academic Year)' : '12 شهراً (سنة دراسية كاملة)'}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex justify-between border-b border-slate-200/60 pb-2">
-                    <span className="text-slate-500">{lang === 'en' ? 'Total Amount Paid:' : 'المبلغ الإجمالي المدفوع:'}</span>
-                    <span className="font-bold text-slate-900">2,900 DZD</span>
-                  </div>
-                  <div className="flex justify-between border-b border-slate-200/60 pb-2">
-                    <span className="text-slate-500">{lang === 'en' ? 'Account Holder:' : 'اسم صاحب الحساب:'}</span>
-                    <span className="font-bold text-slate-900">{currentUser.fullName}</span>
-                  </div>
-                  <div className="flex justify-between border-b border-slate-200/60 pb-2">
-                    <span className="text-slate-500">{lang === 'en' ? 'School & Wilaya:' : 'المدرسة والولاية:'}</span>
-                    <span className="font-bold text-slate-900">{currentUser.schoolName} ({currentUser.wilaya})</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">{lang === 'en' ? 'License Status:' : 'حالة التفعيل:'}</span>
-                    <span className="font-extrabold text-teal-700 flex items-center gap-1">
-                      <CheckCircle className="w-3.5 h-3.5 text-[#0D9488]" />
-                      <span>{lang === 'en' ? 'Officially Activated & Verified' : 'مفعل ومعتمد رسمياً'}</span>
-                    </span>
+
+                  <div className="pt-2 text-[11px] text-slate-400 border-t border-slate-800 flex items-center justify-between">
+                    <span>{lang === 'en' ? 'Security Protocol:' : 'بروتوكول الأمان:'} TLS / Chargily v2</span>
+                    <span className="text-teal-400 font-bold">100% Certified</span>
                   </div>
                 </div>
+
+                {/* Order & Payment Info (Real E-Invoice Details) */}
+                <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 space-y-4 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+                      <h4 className="text-xs font-extrabold text-[#1E3A8A] uppercase tracking-wider flex items-center gap-2">
+                        <ShieldCheck className="w-4 h-4 text-[#0D9488]" />
+                        <span>{lang === 'en' ? 'Payment & E-Invoice Details' : 'تفاصيل عملية الدفع والفاتورة الإلكترونية'}</span>
+                      </h4>
+                      <span className="text-[10px] font-mono px-2 py-0.5 bg-blue-100 text-[#1E3A8A] font-extrabold rounded-md border border-blue-200">
+                        {invoiceNum}
+                      </span>
+                    </div>
+
+                    <div className="space-y-2.5 text-xs text-slate-700 font-medium pt-3">
+                      <div className="flex justify-between border-b border-slate-200/60 pb-2">
+                        <span className="text-slate-500">{lang === 'en' ? 'Payment Gateway:' : 'بوابة الدفع الإلكتروني:'}</span>
+                        <span className="font-extrabold text-[#0D9488]">{licenseDetails?.paidVia || 'Chargily Pay v2 (Edahabia / CIB)'}</span>
+                      </div>
+
+                      <div className="flex justify-between border-b border-slate-200/60 pb-2">
+                        <span className="text-slate-500">{lang === 'en' ? 'Payment Date & Time:' : 'تاريخ ووقت السداد:'}</span>
+                        <span className="font-bold text-slate-900 font-mono">{lang === 'en' ? paymentFormattedEn : paymentFormattedAr}</span>
+                      </div>
+
+                      <div className="flex justify-between border-b border-slate-200/60 pb-2">
+                        <span className="text-slate-500">{lang === 'en' ? 'Account Holder:' : 'اسم صاحب الحساب:'}</span>
+                        <span className="font-bold text-slate-900">{currentUser.fullName || licenseDetails?.userName}</span>
+                      </div>
+
+                      <div className="flex justify-between border-b border-slate-200/60 pb-2">
+                        <span className="text-slate-500">{lang === 'en' ? 'Registered Email:' : 'البريد الإلكتروني المسجل:'}</span>
+                        <span className="font-bold text-slate-900 font-mono">{currentUser.email}</span>
+                      </div>
+
+                      <div className="flex justify-between border-b border-slate-200/60 pb-2">
+                        <span className="text-slate-500">{lang === 'en' ? 'School & Wilaya:' : 'المدرسة والولاية:'}</span>
+                        <span className="font-bold text-slate-900">{currentUser.schoolName ? `${currentUser.schoolName} (${currentUser.wilaya})` : currentUser.wilaya}</span>
+                      </div>
+
+                      {/* Pricing Breakdown: Real Details and Promo Codes */}
+                      <div className="space-y-1.5 pt-1">
+                        <div className="flex justify-between text-slate-500 text-[11px]">
+                          <span>{lang === 'en' ? 'Standard Plan Price:' : 'سعر الخطة السنوي الأساسي:'}</span>
+                          <span className={`${activePromoCode ? 'line-through text-slate-400' : 'font-bold text-slate-800'}`}>
+                            {originalPrice.toLocaleString()} DZD
+                          </span>
+                        </div>
+
+                        {activePromoCode && (
+                          <div className="flex justify-between items-center bg-emerald-50 border border-emerald-200 p-2 rounded-xl text-emerald-800 text-xs">
+                            <span className="font-bold flex items-center gap-1.5">
+                              <Tag className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>{lang === 'en' ? 'Applied Promo Code:' : 'كود الخصم المطبق:'}</span>
+                              <span className="font-mono font-black text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-300">
+                                {activePromoCode}
+                              </span>
+                            </span>
+                            <span className="font-black text-emerald-700">-{discountPercent}%</span>
+                          </div>
+                        )}
+
+                        <div className="flex justify-between items-center bg-slate-100 p-3 rounded-xl border border-slate-200">
+                          <span className="font-extrabold text-slate-800">{lang === 'en' ? 'Real Amount Paid (TTC):' : 'المبلغ الحقيقي الإجمالي المدفوع:'}</span>
+                          <span className="text-base sm:text-lg font-black text-emerald-600 font-mono">
+                            {realPricePaid.toLocaleString()} DZD
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-between pt-1">
+                        <span className="text-slate-500">{lang === 'en' ? 'License Status:' : 'حالة التفعيل:'}</span>
+                        <span className="font-extrabold text-teal-700 flex items-center gap-1">
+                          <CheckCircle className="w-3.5 h-3.5 text-[#0D9488]" />
+                          <span>{lang === 'en' ? 'Officially Activated & Verified' : 'مفعل ومعتمد رسمياً'}</span>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Promo Code Update/Apply Section */}
+                  <div className="pt-3 border-t border-slate-200 space-y-2">
+                    {promoFeedback && (
+                      <div className={`p-2.5 rounded-lg text-xs font-bold ${
+                        promoFeedback.type === 'success' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-red-50 text-red-800 border border-red-200'
+                      }`}>
+                        {promoFeedback.message}
+                      </div>
+                    )}
+                    <form onSubmit={handleApplyPromo} className="flex gap-2">
+                      <div className="relative flex-1">
+                        <Tag className="w-3.5 h-3.5 text-slate-400 absolute top-2.5 left-2.5 rtl:right-2.5 rtl:left-auto" />
+                        <input
+                          type="text"
+                          value={promoInput}
+                          onChange={(e) => setPromoInput(e.target.value)}
+                          placeholder={lang === 'en' ? 'Have a promo code? (e.g. TEACHER2026)' : 'هل لديك كود تخفيض؟ (مثال: TEACHER2026)'}
+                          className="w-full pl-8 pr-3 rtl:pr-8 rtl:pl-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-teal-500 uppercase font-mono"
+                        />
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={applyingPromo || !promoInput.trim()}
+                        className="px-3.5 py-1.5 bg-[#0D9488] hover:bg-teal-700 disabled:bg-slate-300 text-white font-extrabold text-xs rounded-lg transition-colors shrink-0 shadow-xs"
+                      >
+                        {applyingPromo ? (lang === 'en' ? 'Applying...' : 'جاري التطبيق...') : (lang === 'en' ? 'Apply Code' : 'تطبيق الكود')}
+                      </button>
+                    </form>
+                  </div>
+                </div>
+
               </div>
 
             </div>
-
-          </div>
-        )}
+          );
+        })()}
 
       </div>
     </section>
