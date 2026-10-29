@@ -1089,8 +1089,8 @@ app.post("/api/admin/smtp/test", async (req, res) => {
 
 app.post("/api/admin/users", async (req, res) => {
   const { fullName, email, password, role, wilaya, schoolName, primaryGrade, phone, licensePlan, licenseStatus, sendEmail = true } = req.body;
-  if (!email || !fullName) {
-    return res.status(400).json({ error: "البريد الإلكتروني والاسم الكامل مطلوبة" });
+  if (!email || !fullName || typeof password !== "string" || password.length < 12) {
+    return res.status(400).json({ error: "البريد الإلكتروني والاسم وكلمة مرور لا تقل عن 12 حرفاً مطلوبة" });
   }
 
   const cleanEmail = email.trim().toLowerCase();
@@ -1123,7 +1123,7 @@ app.post("/api/admin/users", async (req, res) => {
       fullName,
       licenseKey: newKey,
       planName: plan === 'personal-lifetime' ? 'Personal Lifetime License' : 'Personal Yearly License',
-      password: password || 'teacher123',
+      password,
       schoolName: schoolName || '',
       wilaya: wilaya || '',
       expiresAt: lsResult.expiresAt
@@ -1136,7 +1136,7 @@ app.post("/api/admin/users", async (req, res) => {
     firstName: fullName.split(' ')[0] || fullName,
     lastName: fullName.split(' ').slice(1).join(' ') || '',
     email: cleanEmail,
-    password: password || 'teacher123',
+    password,
     role: role || 'user',
     phone: phone || '',
     wilaya: wilaya || '16 - الجزائر',
@@ -1928,6 +1928,7 @@ app.delete("/api/admin/blog/:id", (req, res) => {
 // Desktop app endpoints. Secrets remain server-side; OTPs are never generated or validated by the desktop client.
 const desktopOtpSendWindows = new Map<string, { startedAt: number; count: number; lastSentAt: number }>();
 const desktopOtpVerifyWindows = new Map<string, { startedAt: number; count: number }>();
+const desktopGeminiWindows = new Map<string, { startedAt: number; count: number }>();
 
 function desktopOtpSecret(): string {
   const secret = process.env.DESKTOP_OTP_SECRET?.trim();
@@ -2032,6 +2033,14 @@ app.post("/api/desktop/gemini/generate", async (req, res) => {
     return res.status(400).json({ error: "Prompt is empty or exceeds the allowed size." });
   }
   if (!licenseKey || licenseKey.length > 256) return res.status(401).json({ error: "A valid Teacher Mate license is required." });
+
+  const rateNow = Date.now();
+  const usage = desktopGeminiWindows.get(licenseKey.toUpperCase());
+  if (usage && rateNow - usage.startedAt < 60_000 && usage.count >= 20) {
+    return res.status(429).json({ error: "AI request limit reached. Please wait one minute." });
+  }
+  if (!usage || rateNow - usage.startedAt >= 60_000) desktopGeminiWindows.set(licenseKey.toUpperCase(), { startedAt: rateNow, count: 1 });
+  else usage.count++;
 
   try {
     let licenseValid = false;
