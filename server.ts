@@ -12,7 +12,7 @@ import {
   sendResetCodeEmailViaNodemailer,
   sendInquiryReplyEmailViaNodemailer
 } from "./src/smtp.ts";
-import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   createPaymentStore,
   MemoryPaymentStore,
@@ -876,7 +876,7 @@ async function callLicenseSeatAPI(
   planId: string = 'pro',
   extraData?: { phone?: string; wilaya?: string; schoolName?: string; role?: string }
 ): Promise<{ key: string; expiresAt?: string; seatLimit?: number }> {
-  const secret = process.env.LICENSESEAT_SECRET_KEY?.trim() || 'ls_sec_live_teacher_mate_2026';
+  const secret = process.env.LICENSESEAT_SECRET_KEY?.trim();
   const productSlug = process.env.LICENSESEAT_PRODUCT_SLUG?.trim() || 'teacher-mate';
   const configuredPlanKey = process.env.LICENSESEAT_PLAN_KEY?.trim();
   
@@ -981,7 +981,7 @@ async function callLicenseSeatAPI(
 
 async function revokeLicenseInLicenseSeat(licenseKey: string, reason: string = 'User account deleted by admin'): Promise<{ success: boolean; error?: string }> {
   if (!licenseKey || !licenseKey.trim()) return { success: true };
-  const secret = process.env.LICENSESEAT_SECRET_KEY?.trim() || 'ls_sec_live_teacher_mate_2026';
+  const secret = process.env.LICENSESEAT_SECRET_KEY?.trim();
   const productSlug = process.env.LICENSESEAT_PRODUCT_SLUG?.trim() || 'teacher-mate';
 
   console.log(`[LicenseSeat] Revoking remote license key "${licenseKey}" for product "${productSlug}" (Reason: ${reason})`);
@@ -1927,6 +1927,114 @@ app.delete("/api/admin/blog/:id", (req, res) => {
     return res.status(404).json({ error: "المقال غير موجود" });
   }
   res.json({ success: true });
+});
+
+// Desktop app endpoints. Secrets remain server-side; OTPs are never generated or validated by the desktop client.
+type DesktopOtpRecord = { digest: Buffer; expiresAt: number; attempts: number; lastSentAt: number };
+const desktopOtpRecords = new Map<string, DesktopOtpRecord>();
+const desktopOtpSendWindows = new Map<string, { startedAt: number; count: number }>();
+
+function desktopOtpDigest(email: string, code: string): Buffer {
+  const secret = process.env.DESKTOP_OTP_SECRET?.trim();
+  if (!secret || secret.length < 32) throw new Error("DESKTOP_OTP_SECRET is not configured.");
+  return createHmac("sha256", secret).update(email).update(":").update(code).digest();
+}
+
+app.post("/api/desktop/verification/send", async (req, res) => {
+  const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+  if (!safeCustomerEmail(email)) return res.status(400).json({ error: "Enter a valid email address." });
+  const now = Date.now();
+  const previous = desktopOtpRecords.get(email);
+  if (previous && now - previous.lastSentAt < 60_000) {
+    return res.status(429).json({ error: "Please wait before requesting another code." });
+  }
+  const window = desktopOtpSendWindows.get(email);
+  if (window && now - window.startedAt < 60 * 60_000 && window.count >= 5) {
+    return res.status(429).json({ error: "Too many verification requests. Try again later." });
+  }
+  try {
+    const code = randomInt(100000, 1000000).toString();
+    const digest = desktopOtpDigest(email, code);
+    const config = loadSmtpSettings();
+    if (!config.pass?.trim()) return res.status(503).json({ error: "Email delivery is not configured on the server." });
+    const transporter = createSmtpTransporter(config);
+    await transporter.sendMail({
+      from: { name: config.fromName || "Teacher Mate", address: config.fromEmail || config.user },
+      to: email,
+      subject: "Your Teacher Mate verification code",
+      text: `Your verification code is: ${code}\n\nIt expires in 10 minutes. If you did not request it, ignore this email.`
+    });
+    desktopOtpRecords.set(email, { digest, expiresAt: now + 10 * 60_000, attempts: 0, lastSentAt: now });
+    if (!window || now - window.startedAt >= 60 * 60_000) desktopOtpSendWindows.set(email, { startedAt: now, count: 1 });
+    else window.count++;
+    return res.json({ success: true, expiresInSeconds: 600 });
+  } catch (error) {
+    console.error("[Desktop OTP] Delivery failed:", safeError(error));
+    return res.status(503).json({ error: "Could not send the verification email. Try again later." });
+  }
+});
+
+app.post("/api/desktop/verification/verify", (req, res) => {
+  const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+  const code = typeof req.body?.code === "string" ? req.body.code.trim() : "";
+  if (!safeCustomerEmail(email) || !/^\d{6}$/.test(code)) {
+    return res.status(400).json({ verified: false, error: "Invalid email or verification code." });
+  }
+  const record = desktopOtpRecords.get(email);
+  if (!record || record.expiresAt < Date.now() || record.attempts >= 5) {
+    desktopOtpRecords.delete(email);
+    return res.status(400).json({ verified: false, error: "The code is invalid or expired. Request a new code." });
+  }
+  record.attempts++;
+  const candidate = desktopOtpDigest(email, code);
+  if (candidate.length !== record.digest.length || !timingSafeEqual(candidate, record.digest)) {
+    return res.status(400).json({ verified: false, error: "Incorrect verification code." });
+  }
+  desktopOtpRecords.delete(email);
+  return res.json({ verified: true });
+});
+
+app.post("/api/desktop/gemini/generate", async (req, res) => {
+  const prompt = typeof req.body?.prompt === "string" ? req.body.prompt.trim() : "";
+  const systemInstruction = typeof req.body?.systemInstruction === "string" ? req.body.systemInstruction.trim() : "";
+  const licenseKey = typeof req.body?.licenseKey === "string" ? req.body.licenseKey.trim() : "";
+  if (!prompt || prompt.length > 50_000 || systemInstruction.length > 12_000) {
+    return res.status(400).json({ error: "Prompt is empty or exceeds the allowed size." });
+  }
+  if (!licenseKey || licenseKey.length > 256) return res.status(401).json({ error: "A valid Teacher Mate license is required." });
+
+  try {
+    let licenseValid = false;
+    const localLicense = dbLicenses.get(licenseKey.toUpperCase());
+    if (localLicense && localLicense.status !== "revoked" && localLicense.status !== "expired") licenseValid = true;
+
+    const licenseSecret = process.env.LICENSESEAT_SECRET_KEY?.trim();
+    const productSlug = process.env.LICENSESEAT_PRODUCT_SLUG?.trim();
+    if (!licenseValid && licenseSecret && productSlug) {
+      const check = await fetch(`https://licenseseat.com/api/v1/products/${encodeURIComponent(productSlug)}/licenses/validate`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${licenseSecret}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ license_key: licenseKey }),
+        signal: AbortSignal.timeout(8_000)
+      });
+      if (check.ok) {
+        const result: any = await check.json().catch(() => ({}));
+        licenseValid = result.valid === true;
+      }
+    }
+    if (!licenseValid) return res.status(403).json({ error: "The license could not be validated." });
+
+    const ai = getGeminiClient();
+    const response = await ai.models.generateContent({
+      model: "gemini-3.6-flash",
+      contents: prompt,
+      config: systemInstruction ? { systemInstruction } : undefined
+    });
+    return res.json({ text: response.text || "" });
+  } catch (error) {
+    console.error("[Desktop Gemini] Request failed:", safeError(error));
+    return res.status(503).json({ error: "AI service is temporarily unavailable." });
+  }
 });
 
 // AI Teaching Card Endpoint (Gemini 3.6 Flash)
