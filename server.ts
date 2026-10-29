@@ -2006,7 +2006,7 @@ app.post("/api/desktop/gemini/generate", async (req, res) => {
   try {
     let licenseValid = false;
     const localLicense = dbLicenses.get(licenseKey.toUpperCase());
-    if (localLicense && localLicense.status !== "revoked" && localLicense.status !== "expired") licenseValid = true;
+    if (localLicense && localLicense.status === "active" && (!localLicense.expiresAt || new Date(localLicense.expiresAt).getTime() > Date.now())) licenseValid = true;
 
     const licenseSecret = process.env.LICENSESEAT_SECRET_KEY?.trim();
     const productSlug = process.env.LICENSESEAT_PRODUCT_SLUG?.trim();
@@ -2194,7 +2194,7 @@ function getLicenseSeatPlanKey(planId: string): string {
 }
 
 async function createLicenseSeatLicense(order: PaymentOrder, checkoutId: string) {
-  const secret = process.env.LICENSESEAT_SECRET_KEY?.trim() || 'ls_sec_live_teacher_mate_2026';
+  const secret = process.env.LICENSESEAT_SECRET_KEY?.trim();
   const productSlug = process.env.LICENSESEAT_PRODUCT_SLUG?.trim() || 'teacher-mate';
   const configuredPlanKey = process.env.LICENSESEAT_PLAN_KEY?.trim();
 
@@ -2716,7 +2716,7 @@ app.post("/api/license/verify", async (req, res) => {
   const cleanEmail = typeof userEmail === 'string' ? userEmail.trim().toLowerCase() : '';
 
   // 1. Query LicenseSeat API first if configured
-  const secret = process.env.LICENSESEAT_SECRET_KEY?.trim() || 'ls_sec_live_teacher_mate_2026';
+  const secret = process.env.LICENSESEAT_SECRET_KEY?.trim();
   const productSlug = process.env.LICENSESEAT_PRODUCT_SLUG?.trim() || 'teacher-mate';
   if (secret && productSlug) {
     try {
