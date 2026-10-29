@@ -566,38 +566,34 @@ app.post("/api/auth/login", (req, res) => {
   const cleanEmail = email.trim().toLowerCase();
   let existingUser = dbUsers.get(cleanEmail);
 
-  // If master admin account credential matched
-  if (cleanEmail === 'abdallahbourrich66@gmail.com' && password === 'abdallah66') {
-    if (!existingUser) {
-      existingUser = {
-        id: 'user-abdallah-66',
-        firstName: 'Abdallah',
-        lastName: 'Bourrich',
-        fullName: 'Abdallah Bourrich',
-        email: 'abdallahbourrich66@gmail.com',
-        password: 'abdallah66',
-        role: 'admin',
-        wilaya: '16 - الجزائر',
-        schoolName: 'الإدارة المركزية - نظام رفيق أستاذ الإنجليزية',
-        primaryGrade: '4AP',
-        licenseKey: 'TC-ALG-ADMIN-MASTER-001',
-        licenseStatus: 'active',
-        licensePlan: 'pro',
-        createdAt: '2026-01-10T10:00:00.000Z',
-        expiresAt: '2027-01-10',
-        amountPaidDZD: 3000,
-        paidVia: 'Chargily Pay v2 (Edahabia/CIB)',
-        maxDevices: 1,
-        invoiceNumber: 'INV-2026-ABD101'
-      };
-      dbUsers.set(cleanEmail, existingUser);
-    } else {
-      existingUser.role = 'admin';
-      existingUser.expiresAt = existingUser.expiresAt || '2027-01-10';
-      existingUser.maxDevices = 1;
-      existingUser.amountPaidDZD = existingUser.amountPaidDZD || 3000;
-      dbUsers.set(cleanEmail, existingUser);
-    }
+  // Master admin credentials must be configured as deployment secrets.
+  const configuredAdminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+  const configuredAdminPassword = process.env.ADMIN_PASSWORD;
+  const suppliedPassword = String(password);
+  const configuredPasswordBytes = Buffer.from(configuredAdminPassword || "", "utf8");
+  const suppliedPasswordBytes = Buffer.from(suppliedPassword, "utf8");
+  const adminPasswordMatches = Boolean(
+    configuredAdminPassword &&
+    configuredAdminPassword.length >= 16 &&
+    configuredPasswordBytes.length === suppliedPasswordBytes.length &&
+    timingSafeEqual(configuredPasswordBytes, suppliedPasswordBytes)
+  );
+
+  if (configuredAdminEmail && cleanEmail === configuredAdminEmail && adminPasswordMatches) {
+    existingUser = existingUser || {
+      id: "teacher-mate-admin",
+      firstName: "Teacher Mate",
+      lastName: "Administrator",
+      fullName: "Teacher Mate Administrator",
+      email: configuredAdminEmail,
+      role: "admin",
+      licenseStatus: "active",
+      licensePlan: "admin"
+    };
+    existingUser.role = "admin";
+    existingUser.email = configuredAdminEmail;
+    delete existingUser.password;
+    dbUsers.set(configuredAdminEmail, existingUser);
     return res.json({ user: existingUser, token: "admin-jwt-token" });
   }
 
