@@ -12,7 +12,7 @@ import {
   sendResetCodeEmailViaNodemailer,
   sendInquiryReplyEmailViaNodemailer
 } from "./src/smtp.ts";
-import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   createPaymentStore,
   MemoryPaymentStore,
@@ -566,38 +566,34 @@ app.post("/api/auth/login", (req, res) => {
   const cleanEmail = email.trim().toLowerCase();
   let existingUser = dbUsers.get(cleanEmail);
 
-  // If master admin account credential matched
-  if (cleanEmail === 'abdallahbourrich66@gmail.com' && password === 'abdallah66') {
-    if (!existingUser) {
-      existingUser = {
-        id: 'user-abdallah-66',
-        firstName: 'Abdallah',
-        lastName: 'Bourrich',
-        fullName: 'Abdallah Bourrich',
-        email: 'abdallahbourrich66@gmail.com',
-        password: 'abdallah66',
-        role: 'admin',
-        wilaya: '16 - الجزائر',
-        schoolName: 'الإدارة المركزية - نظام رفيق أستاذ الإنجليزية',
-        primaryGrade: '4AP',
-        licenseKey: 'TC-ALG-ADMIN-MASTER-001',
-        licenseStatus: 'active',
-        licensePlan: 'pro',
-        createdAt: '2026-01-10T10:00:00.000Z',
-        expiresAt: '2027-01-10',
-        amountPaidDZD: 3000,
-        paidVia: 'Chargily Pay v2 (Edahabia/CIB)',
-        maxDevices: 1,
-        invoiceNumber: 'INV-2026-ABD101'
-      };
-      dbUsers.set(cleanEmail, existingUser);
-    } else {
-      existingUser.role = 'admin';
-      existingUser.expiresAt = existingUser.expiresAt || '2027-01-10';
-      existingUser.maxDevices = 1;
-      existingUser.amountPaidDZD = existingUser.amountPaidDZD || 3000;
-      dbUsers.set(cleanEmail, existingUser);
-    }
+  // Master admin credentials must be configured as deployment secrets.
+  const configuredAdminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+  const configuredAdminPassword = process.env.ADMIN_PASSWORD;
+  const suppliedPassword = String(password);
+  const configuredPasswordBytes = Buffer.from(configuredAdminPassword || "", "utf8");
+  const suppliedPasswordBytes = Buffer.from(suppliedPassword, "utf8");
+  const adminPasswordMatches = Boolean(
+    configuredAdminPassword &&
+    configuredAdminPassword.length >= 16 &&
+    configuredPasswordBytes.length === suppliedPasswordBytes.length &&
+    timingSafeEqual(configuredPasswordBytes, suppliedPasswordBytes)
+  );
+
+  if (configuredAdminEmail && cleanEmail === configuredAdminEmail && adminPasswordMatches) {
+    existingUser = existingUser || {
+      id: "teacher-mate-admin",
+      firstName: "Teacher Mate",
+      lastName: "Administrator",
+      fullName: "Teacher Mate Administrator",
+      email: configuredAdminEmail,
+      role: "admin",
+      licenseStatus: "active",
+      licensePlan: "admin"
+    };
+    existingUser.role = "admin";
+    existingUser.email = configuredAdminEmail;
+    delete existingUser.password;
+    dbUsers.set(configuredAdminEmail, existingUser);
     return res.json({ user: existingUser, token: "admin-jwt-token" });
   }
 
@@ -876,7 +872,7 @@ async function callLicenseSeatAPI(
   planId: string = 'pro',
   extraData?: { phone?: string; wilaya?: string; schoolName?: string; role?: string }
 ): Promise<{ key: string; expiresAt?: string; seatLimit?: number }> {
-  const secret = process.env.LICENSESEAT_SECRET_KEY?.trim() || 'ls_sec_live_teacher_mate_2026';
+  const secret = process.env.LICENSESEAT_SECRET_KEY?.trim();
   const productSlug = process.env.LICENSESEAT_PRODUCT_SLUG?.trim() || 'teacher-mate';
   const configuredPlanKey = process.env.LICENSESEAT_PLAN_KEY?.trim();
   
@@ -981,7 +977,7 @@ async function callLicenseSeatAPI(
 
 async function revokeLicenseInLicenseSeat(licenseKey: string, reason: string = 'User account deleted by admin'): Promise<{ success: boolean; error?: string }> {
   if (!licenseKey || !licenseKey.trim()) return { success: true };
-  const secret = process.env.LICENSESEAT_SECRET_KEY?.trim() || 'ls_sec_live_teacher_mate_2026';
+  const secret = process.env.LICENSESEAT_SECRET_KEY?.trim();
   const productSlug = process.env.LICENSESEAT_PRODUCT_SLUG?.trim() || 'teacher-mate';
 
   console.log(`[LicenseSeat] Revoking remote license key "${licenseKey}" for product "${productSlug}" (Reason: ${reason})`);
@@ -1093,8 +1089,8 @@ app.post("/api/admin/smtp/test", async (req, res) => {
 
 app.post("/api/admin/users", async (req, res) => {
   const { fullName, email, password, role, wilaya, schoolName, primaryGrade, phone, licensePlan, licenseStatus, sendEmail = true } = req.body;
-  if (!email || !fullName) {
-    return res.status(400).json({ error: "البريد الإلكتروني والاسم الكامل مطلوبة" });
+  if (!email || !fullName || typeof password !== "string" || password.length < 12) {
+    return res.status(400).json({ error: "البريد الإلكتروني والاسم وكلمة مرور لا تقل عن 12 حرفاً مطلوبة" });
   }
 
   const cleanEmail = email.trim().toLowerCase();
@@ -1127,7 +1123,7 @@ app.post("/api/admin/users", async (req, res) => {
       fullName,
       licenseKey: newKey,
       planName: plan === 'personal-lifetime' ? 'Personal Lifetime License' : 'Personal Yearly License',
-      password: password || 'teacher123',
+      password,
       schoolName: schoolName || '',
       wilaya: wilaya || '',
       expiresAt: lsResult.expiresAt
@@ -1140,7 +1136,7 @@ app.post("/api/admin/users", async (req, res) => {
     firstName: fullName.split(' ')[0] || fullName,
     lastName: fullName.split(' ').slice(1).join(' ') || '',
     email: cleanEmail,
-    password: password || 'teacher123',
+    password,
     role: role || 'user',
     phone: phone || '',
     wilaya: wilaya || '16 - الجزائر',
@@ -1929,6 +1925,157 @@ app.delete("/api/admin/blog/:id", (req, res) => {
   res.json({ success: true });
 });
 
+// Desktop app endpoints. Secrets remain server-side; OTPs are never generated or validated by the desktop client.
+const desktopOtpSendWindows = new Map<string, { startedAt: number; count: number; lastSentAt: number }>();
+const desktopOtpVerifyWindows = new Map<string, { startedAt: number; count: number }>();
+const desktopGeminiWindows = new Map<string, { startedAt: number; count: number }>();
+
+function desktopOtpSecret(): string {
+  const secret = process.env.DESKTOP_OTP_SECRET?.trim();
+  if (!secret || secret.length < 32) throw new Error("DESKTOP_OTP_SECRET is not configured.");
+  return secret;
+}
+
+function signDesktopChallenge(payload: string): string {
+  return createHmac("sha256", desktopOtpSecret()).update(payload).digest("base64url");
+}
+
+function desktopOtpDigest(email: string, code: string): Buffer {
+  const secret = process.env.DESKTOP_OTP_SECRET?.trim();
+  if (!secret || secret.length < 32) throw new Error("DESKTOP_OTP_SECRET is not configured.");
+  return createHmac("sha256", secret).update(email).update(":").update(code).digest();
+}
+
+app.post("/api/desktop/verification/send", async (req, res) => {
+  const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+  if (!safeCustomerEmail(email)) return res.status(400).json({ error: "Enter a valid email address." });
+  const now = Date.now();
+  const window = desktopOtpSendWindows.get(email);
+  if (window && now - window.startedAt < 60 * 60_000 && window.count > 0 && now - window.lastSentAt < 60_000) {
+    return res.status(429).json({ error: "Please wait before requesting another code." });
+  }
+  if (window && now - window.startedAt < 60 * 60_000 && window.count >= 5) {
+    return res.status(429).json({ error: "Too many verification requests. Try again later." });
+  }
+  try {
+    const code = randomInt(100000, 1000000).toString();
+    const digest = desktopOtpDigest(email, code).toString("hex");
+    const challengePayload = Buffer.from(JSON.stringify({
+      email,
+      digest,
+      expiresAt: now + 10 * 60_000,
+      nonce: randomBytes(16).toString("hex")
+    })).toString("base64url");
+    const challengeToken = `${challengePayload}.${signDesktopChallenge(challengePayload)}`;
+    const config = loadSmtpSettings();
+    if (!config.pass?.trim()) return res.status(503).json({ error: "Email delivery is not configured on the server." });
+    const transporter = createSmtpTransporter(config);
+    await transporter.sendMail({
+      from: { name: config.fromName || "Teacher Mate", address: config.fromEmail || config.user },
+      to: email,
+      subject: "Your Teacher Mate verification code",
+      text: `Your verification code is: ${code}\n\nIt expires in 10 minutes. If you did not request it, ignore this email.`
+    });
+    if (!window || now - window.startedAt >= 60 * 60_000) desktopOtpSendWindows.set(email, { startedAt: now, count: 1, lastSentAt: now });
+    else { window.count++; window.lastSentAt = now; }
+    return res.json({ success: true, challengeToken, expiresInSeconds: 600 });
+  } catch (error) {
+    console.error("[Desktop OTP] Delivery failed:", safeError(error));
+    return res.status(503).json({ error: "Could not send the verification email. Try again later." });
+  }
+});
+
+app.post("/api/desktop/verification/verify", (req, res) => {
+  const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+  const code = typeof req.body?.code === "string" ? req.body.code.trim() : "";
+  const token = typeof req.body?.challengeToken === "string" ? req.body.challengeToken : "";
+  if (!safeCustomerEmail(email) || !/^\d{6}$/.test(code) || token.length > 4096) {
+    return res.status(400).json({ verified: false, error: "Invalid email or verification code." });
+  }
+
+  const attempts = desktopOtpVerifyWindows.get(email);
+  const now = Date.now();
+  if (attempts && now - attempts.startedAt < 10 * 60_000 && attempts.count >= 8) {
+    return res.status(429).json({ verified: false, error: "Too many attempts. Request a new code later." });
+  }
+  if (!attempts || now - attempts.startedAt >= 10 * 60_000) desktopOtpVerifyWindows.set(email, { startedAt: now, count: 1 });
+  else attempts.count++;
+
+  try {
+    const [payload, signature, extra] = token.split(".");
+    if (!payload || !signature || extra) return res.status(400).json({ verified: false, error: "Invalid or expired verification challenge." });
+    const expectedSignature = Buffer.from(signDesktopChallenge(payload), "base64url");
+    const receivedSignature = Buffer.from(signature, "base64url");
+    if (expectedSignature.length !== receivedSignature.length || !timingSafeEqual(expectedSignature, receivedSignature)) {
+      return res.status(400).json({ verified: false, error: "Invalid or expired verification challenge." });
+    }
+
+    const challenge = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    if (challenge.email !== email || !Number.isFinite(challenge.expiresAt) || challenge.expiresAt < now) {
+      return res.status(400).json({ verified: false, error: "The code is invalid or expired. Request a new code." });
+    }
+    const expectedDigest = Buffer.from(challenge.digest, "hex");
+    const suppliedDigest = desktopOtpDigest(email, code);
+    if (expectedDigest.length !== suppliedDigest.length || !timingSafeEqual(expectedDigest, suppliedDigest)) {
+      return res.status(400).json({ verified: false, error: "Incorrect verification code." });
+    }
+    return res.json({ verified: true });
+  } catch {
+    return res.status(503).json({ verified: false, error: "Verification service is not configured." });
+  }
+});
+
+app.post("/api/desktop/gemini/generate", async (req, res) => {
+  const prompt = typeof req.body?.prompt === "string" ? req.body.prompt.trim() : "";
+  const systemInstruction = typeof req.body?.systemInstruction === "string" ? req.body.systemInstruction.trim() : "";
+  const licenseKey = typeof req.body?.licenseKey === "string" ? req.body.licenseKey.trim() : "";
+  if (!prompt || prompt.length > 50_000 || systemInstruction.length > 12_000) {
+    return res.status(400).json({ error: "Prompt is empty or exceeds the allowed size." });
+  }
+  if (!licenseKey || licenseKey.length > 256) return res.status(401).json({ error: "A valid Teacher Mate license is required." });
+
+  const rateNow = Date.now();
+  const usage = desktopGeminiWindows.get(licenseKey.toUpperCase());
+  if (usage && rateNow - usage.startedAt < 60_000 && usage.count >= 20) {
+    return res.status(429).json({ error: "AI request limit reached. Please wait one minute." });
+  }
+  if (!usage || rateNow - usage.startedAt >= 60_000) desktopGeminiWindows.set(licenseKey.toUpperCase(), { startedAt: rateNow, count: 1 });
+  else usage.count++;
+
+  try {
+    let licenseValid = false;
+    const localLicense = dbLicenses.get(licenseKey.toUpperCase());
+    if (localLicense && localLicense.status === "active" && (!localLicense.expiresAt || new Date(localLicense.expiresAt).getTime() > Date.now())) licenseValid = true;
+
+    const licenseSecret = process.env.LICENSESEAT_SECRET_KEY?.trim();
+    const productSlug = process.env.LICENSESEAT_PRODUCT_SLUG?.trim();
+    if (!licenseValid && licenseSecret && productSlug) {
+      const check = await fetch(`https://licenseseat.com/api/v1/products/${encodeURIComponent(productSlug)}/licenses/validate`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${licenseSecret}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ license_key: licenseKey }),
+        signal: AbortSignal.timeout(8_000)
+      });
+      if (check.ok) {
+        const result: any = await check.json().catch(() => ({}));
+        licenseValid = result.valid === true;
+      }
+    }
+    if (!licenseValid) return res.status(403).json({ error: "The license could not be validated." });
+
+    const ai = getGeminiClient();
+    const response = await ai.models.generateContent({
+      model: "gemini-3.6-flash",
+      contents: prompt,
+      config: systemInstruction ? { systemInstruction } : undefined
+    });
+    return res.json({ text: response.text || "" });
+  } catch (error) {
+    console.error("[Desktop Gemini] Request failed:", safeError(error));
+    return res.status(503).json({ error: "AI service is temporarily unavailable." });
+  }
+});
+
 // AI Teaching Card Endpoint (Gemini 3.6 Flash)
 app.post("/api/gemini/lesson-card", async (req, res) => {
   try {
@@ -2086,7 +2233,7 @@ function getLicenseSeatPlanKey(planId: string): string {
 }
 
 async function createLicenseSeatLicense(order: PaymentOrder, checkoutId: string) {
-  const secret = process.env.LICENSESEAT_SECRET_KEY?.trim() || 'ls_sec_live_teacher_mate_2026';
+  const secret = process.env.LICENSESEAT_SECRET_KEY?.trim();
   const productSlug = process.env.LICENSESEAT_PRODUCT_SLUG?.trim() || 'teacher-mate';
   const configuredPlanKey = process.env.LICENSESEAT_PLAN_KEY?.trim();
 
@@ -2608,7 +2755,7 @@ app.post("/api/license/verify", async (req, res) => {
   const cleanEmail = typeof userEmail === 'string' ? userEmail.trim().toLowerCase() : '';
 
   // 1. Query LicenseSeat API first if configured
-  const secret = process.env.LICENSESEAT_SECRET_KEY?.trim() || 'ls_sec_live_teacher_mate_2026';
+  const secret = process.env.LICENSESEAT_SECRET_KEY?.trim();
   const productSlug = process.env.LICENSESEAT_PRODUCT_SLUG?.trim() || 'teacher-mate';
   if (secret && productSlug) {
     try {
