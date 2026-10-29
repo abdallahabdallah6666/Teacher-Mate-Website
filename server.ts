@@ -1926,9 +1926,18 @@ app.delete("/api/admin/blog/:id", (req, res) => {
 });
 
 // Desktop app endpoints. Secrets remain server-side; OTPs are never generated or validated by the desktop client.
-type DesktopOtpRecord = { digest: Buffer; expiresAt: number; attempts: number; lastSentAt: number };
-const desktopOtpRecords = new Map<string, DesktopOtpRecord>();
 const desktopOtpSendWindows = new Map<string, { startedAt: number; count: number }>();
+const desktopOtpVerifyWindows = new Map<string, { startedAt: number; count: number }>();
+
+function desktopOtpSecret(): string {
+  const secret = process.env.DESKTOP_OTP_SECRET?.trim();
+  if (!secret || secret.length < 32) throw new Error("DESKTOP_OTP_SECRET is not configured.");
+  return secret;
+}
+
+function signDesktopChallenge(payload: string): string {
+  return createHmac("sha256", desktopOtpSecret()).update(payload).digest("base64url");
+}
 
 function desktopOtpDigest(email: string, code: string): Buffer {
   const secret = process.env.DESKTOP_OTP_SECRET?.trim();
@@ -1940,17 +1949,23 @@ app.post("/api/desktop/verification/send", async (req, res) => {
   const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
   if (!safeCustomerEmail(email)) return res.status(400).json({ error: "Enter a valid email address." });
   const now = Date.now();
-  const previous = desktopOtpRecords.get(email);
-  if (previous && now - previous.lastSentAt < 60_000) {
+  const window = desktopOtpSendWindows.get(email);
+  if (window && now - window.startedAt < 60 * 60_000 && window.count > 0 && now - window.lastSentAt < 60_000) {
     return res.status(429).json({ error: "Please wait before requesting another code." });
   }
-  const window = desktopOtpSendWindows.get(email);
   if (window && now - window.startedAt < 60 * 60_000 && window.count >= 5) {
     return res.status(429).json({ error: "Too many verification requests. Try again later." });
   }
   try {
     const code = randomInt(100000, 1000000).toString();
-    const digest = desktopOtpDigest(email, code);
+    const digest = desktopOtpDigest(email, code).toString("hex");
+    const challengePayload = Buffer.from(JSON.stringify({
+      email,
+      digest,
+      expiresAt: now + 10 * 60_000,
+      nonce: randomBytes(16).toString("hex")
+    })).toString("base64url");
+    const challengeToken = `${challengePayload}.${signDesktopChallenge(challengePayload)}`;
     const config = loadSmtpSettings();
     if (!config.pass?.trim()) return res.status(503).json({ error: "Email delivery is not configured on the server." });
     const transporter = createSmtpTransporter(config);
@@ -1960,10 +1975,9 @@ app.post("/api/desktop/verification/send", async (req, res) => {
       subject: "Your Teacher Mate verification code",
       text: `Your verification code is: ${code}\n\nIt expires in 10 minutes. If you did not request it, ignore this email.`
     });
-    desktopOtpRecords.set(email, { digest, expiresAt: now + 10 * 60_000, attempts: 0, lastSentAt: now });
-    if (!window || now - window.startedAt >= 60 * 60_000) desktopOtpSendWindows.set(email, { startedAt: now, count: 1 });
-    else window.count++;
-    return res.json({ success: true, expiresInSeconds: 600 });
+    if (!window || now - window.startedAt >= 60 * 60_000) desktopOtpSendWindows.set(email, { startedAt: now, count: 1, lastSentAt: now });
+    else { window.count++; window.lastSentAt = now; }
+    return res.json({ success: true, challengeToken, expiresInSeconds: 600 });
   } catch (error) {
     console.error("[Desktop OTP] Delivery failed:", safeError(error));
     return res.status(503).json({ error: "Could not send the verification email. Try again later." });
@@ -1973,21 +1987,41 @@ app.post("/api/desktop/verification/send", async (req, res) => {
 app.post("/api/desktop/verification/verify", (req, res) => {
   const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
   const code = typeof req.body?.code === "string" ? req.body.code.trim() : "";
-  if (!safeCustomerEmail(email) || !/^\d{6}$/.test(code)) {
+  const token = typeof req.body?.challengeToken === "string" ? req.body.challengeToken : "";
+  if (!safeCustomerEmail(email) || !/^\d{6}$/.test(code) || token.length > 4096) {
     return res.status(400).json({ verified: false, error: "Invalid email or verification code." });
   }
-  const record = desktopOtpRecords.get(email);
-  if (!record || record.expiresAt < Date.now() || record.attempts >= 5) {
-    desktopOtpRecords.delete(email);
-    return res.status(400).json({ verified: false, error: "The code is invalid or expired. Request a new code." });
+
+  const attempts = desktopOtpVerifyWindows.get(email);
+  const now = Date.now();
+  if (attempts && now - attempts.startedAt < 10 * 60_000 && attempts.count >= 8) {
+    return res.status(429).json({ verified: false, error: "Too many attempts. Request a new code later." });
   }
-  record.attempts++;
-  const candidate = desktopOtpDigest(email, code);
-  if (candidate.length !== record.digest.length || !timingSafeEqual(candidate, record.digest)) {
-    return res.status(400).json({ verified: false, error: "Incorrect verification code." });
+  if (!attempts || now - attempts.startedAt >= 10 * 60_000) desktopOtpVerifyWindows.set(email, { startedAt: now, count: 1 });
+  else attempts.count++;
+
+  try {
+    const [payload, signature, extra] = token.split(".");
+    if (!payload || !signature || extra) return res.status(400).json({ verified: false, error: "Invalid or expired verification challenge." });
+    const expectedSignature = Buffer.from(signDesktopChallenge(payload), "base64url");
+    const receivedSignature = Buffer.from(signature, "base64url");
+    if (expectedSignature.length !== receivedSignature.length || !timingSafeEqual(expectedSignature, receivedSignature)) {
+      return res.status(400).json({ verified: false, error: "Invalid or expired verification challenge." });
+    }
+
+    const challenge = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    if (challenge.email !== email || !Number.isFinite(challenge.expiresAt) || challenge.expiresAt < now) {
+      return res.status(400).json({ verified: false, error: "The code is invalid or expired. Request a new code." });
+    }
+    const expectedDigest = Buffer.from(challenge.digest, "hex");
+    const suppliedDigest = desktopOtpDigest(email, code);
+    if (expectedDigest.length !== suppliedDigest.length || !timingSafeEqual(expectedDigest, suppliedDigest)) {
+      return res.status(400).json({ verified: false, error: "Incorrect verification code." });
+    }
+    return res.json({ verified: true });
+  } catch {
+    return res.status(503).json({ verified: false, error: "Verification service is not configured." });
   }
-  desktopOtpRecords.delete(email);
-  return res.json({ verified: true });
 });
 
 app.post("/api/desktop/gemini/generate", async (req, res) => {
