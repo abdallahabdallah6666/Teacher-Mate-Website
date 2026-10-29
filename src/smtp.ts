@@ -21,7 +21,7 @@ export const DEFAULT_SMTP_CONFIG: SmtpConfig = {
   port: 587,
   secure: false,
   user: 'teachermatehelp@gmail.com',
-  pass: 'hicl yeie vooq jwxn',
+  pass: '',
   fromName: 'رفيق المعلم الجزائري - Teacher Mate DZ',
   fromEmail: 'teachermatehelp@gmail.com'
 };
