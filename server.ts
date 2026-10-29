@@ -1926,7 +1926,7 @@ app.delete("/api/admin/blog/:id", (req, res) => {
 });
 
 // Desktop app endpoints. Secrets remain server-side; OTPs are never generated or validated by the desktop client.
-const desktopOtpSendWindows = new Map<string, { startedAt: number; count: number }>();
+const desktopOtpSendWindows = new Map<string, { startedAt: number; count: number; lastSentAt: number }>();
 const desktopOtpVerifyWindows = new Map<string, { startedAt: number; count: number }>();
 
 function desktopOtpSecret(): string {
