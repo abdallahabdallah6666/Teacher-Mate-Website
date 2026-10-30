@@ -127,7 +127,7 @@ export default function App() {
             onOpenLogin={handleOpenLogin}
           />
 
-          {/* Section 2: Primary English Desktop Features */}
+          {/* Section 2: Primary English Desktop Features Showcase (Dynamic Film) */}
           <FeatureGrid
             lang={activeLang}
           />

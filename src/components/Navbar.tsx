@@ -26,17 +26,21 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           
-          {/* Logo & Brand ONLY (Icon + Title) */}
+          {/* Logo & Brand (New Official App Icon + Title) */}
           <div 
             className="flex items-center space-x-3 rtl:space-x-reverse cursor-pointer" 
             onClick={() => onNavigateToSection?.('hero')}
           >
-            <div className="w-10 h-10 rounded-lg bg-[#1E3A8A] flex items-center justify-center text-white shadow-sm shrink-0">
-              <BookOpenCheck className="w-5 h-5 text-white" />
+            <div className="w-10 h-10 rounded-xl overflow-hidden shadow-xs shrink-0 border border-slate-200 bg-white">
+              <img
+                src="/assets/aistudio/1000034518_bfa9ca9b.png"
+                alt="Teacher Mate"
+                className="w-full h-full object-cover"
+              />
             </div>
             <div className="flex flex-col">
               <span className="text-lg sm:text-xl font-extrabold tracking-tight text-[#1E3A8A]">
-                Teacher Companion
+                Teacher Mate
               </span>
               <span className="text-[10px] font-bold text-[#0D9488]">
                 {activeLang === 'ar' ? 'طبعة أستاذ اللغة الإنجليزية بالجزائر' : 'Algerian Primary English Edition'}

@@ -17,15 +17,19 @@ export const Footer: React.FC<FooterProps> = ({ lang, onNavigateToSection }) => 
           {/* Brand Info */}
           <div className="space-y-4 md:col-span-1">
             <div className="flex items-center space-x-3 rtl:space-x-reverse">
-              <div className="w-9 h-9 rounded-md bg-[#0D9488] flex items-center justify-center text-white shadow-sm">
-                <BookOpenCheck className="w-5 h-5" />
+              <div className="w-10 h-10 rounded-xl overflow-hidden shadow-sm shrink-0 border border-blue-700/60 bg-white">
+                <img
+                  src="/assets/aistudio/1000034518_bfa9ca9b.png"
+                  alt="Teacher Mate"
+                  className="w-full h-full object-cover"
+                />
               </div>
-              <span className="text-lg font-bold text-white tracking-tight">Teacher Companion</span>
+              <span className="text-lg font-extrabold text-white tracking-tight">Teacher Mate</span>
             </div>
 
             <p className="text-slate-300 leading-relaxed font-normal">
               {lang === 'ar'
-                ? 'مكتب العمل والبيئة البيداغوجية الشاملة المدعومة بالذكاء الاصطناعي والمصممة خصيصاً لمُعلمي المدارس الابتدائية الجزائرية (3AP, 4AP, 5AP).'
+                ? 'مكتب العمل والبيئة البيداغوجية الشاملة المدعومة بالذكاء الاصطناعي والمصممة خصيصاً لمُعلمي اللغة الإنجليزية بالمدارس الابتدائية الجزائرية (3AP, 4AP, 5AP).'
                 : 'Desktop workspace for primary English teachers in Algeria (3AP, 4AP, 5AP).'}
             </p>
 
@@ -100,7 +104,7 @@ export const Footer: React.FC<FooterProps> = ({ lang, onNavigateToSection }) => 
 
         {/* Bottom Bar */}
         <div className="pt-8 border-t border-blue-900/80 flex flex-col sm:flex-row items-center justify-between gap-4 text-[11px] text-slate-300 font-medium">
-          <p>© {new Date().getFullYear()} Teacher Companion Algeria. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} Teacher Mate Algeria. All rights reserved.</p>
           <p className="flex items-center gap-1">
             Made with <Heart className="w-3.5 h-3.5 text-rose-400 fill-rose-400" /> for primary school teachers in Algeria
           </p>

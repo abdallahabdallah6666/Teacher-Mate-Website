@@ -19,7 +19,7 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
   const handleStartDownload = (filename: string) => {
     const element = document.createElement("a");
     const file = new Blob([
-      `Teacher Companion v2.4 Algeria Desktop Software Installer\nVersion: 2.4.0-DZ\nTarget Platform: ${filename}\nStatus: Ready for installation\n\nThank you for choosing Teacher Companion for Algerian Primary Educators!`
+      `Teacher Mate v2.4 Algeria Desktop Software Installer\nVersion: 2.4.0-DZ\nTarget Platform: ${filename}\nStatus: Ready for installation\n\nThank you for choosing Teacher Mate for Algerian Primary Educators!`
     ], { type: 'text/plain' });
     element.href = URL.createObjectURL(file);
     element.download = filename;
@@ -30,7 +30,7 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white border border-slate-200 rounded-lg max-w-xl w-full p-6 sm:p-8 relative space-y-6 text-slate-800 shadow-xl animate-fadeIn">
+      <div className="bg-white border border-slate-200 rounded-2xl max-w-xl w-full p-6 sm:p-8 relative space-y-6 text-slate-800 shadow-xl animate-fadeIn">
         
         {/* Close button */}
         <button
@@ -40,15 +40,19 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
           <X className="w-5 h-5" />
         </button>
 
-        <div className="text-center space-y-2">
-          <div className="w-12 h-12 rounded-lg bg-teal-50 border border-teal-200 text-[#0D9488] flex items-center justify-center mx-auto">
-            <Download className="w-6 h-6" />
+        <div className="text-center space-y-3">
+          <div className="w-14 h-14 rounded-2xl overflow-hidden shadow-sm mx-auto border border-slate-200 bg-white">
+            <img
+              src="/assets/aistudio/1000034518_bfa9ca9b.png"
+              alt="Teacher Mate"
+              className="w-full h-full object-cover"
+            />
           </div>
-          <h3 className="text-2xl font-bold text-[#1E3A8A]">
-            {lang === 'ar' ? 'تنزيل برنامج Teacher Companion' : 'Download Teacher Companion'}
+          <h3 className="text-2xl font-extrabold text-[#1E3A8A]">
+            {lang === 'ar' ? 'تنزيل برنامج Teacher Mate' : 'Download Teacher Mate'}
           </h3>
           <p className="text-xs text-slate-500">
-            {lang === 'ar' ? 'اختر نظام التشغيل الخاص بك للبدء' : 'Choose your operating system to start'}
+            {lang === 'ar' ? 'اختر نظام التشغيل الخاص بحاسوبك للبدء في التثبيت' : 'Choose your operating system to start installation'}
           </p>
         </div>
 
