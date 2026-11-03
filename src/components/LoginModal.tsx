@@ -178,6 +178,24 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             </button>
           </div>
 
+          <div className="text-center pt-2 border-t border-slate-100">
+            <span className="text-xs text-slate-500 font-medium">
+              {lang === 'ar' ? 'ليس لديك حساب بعد؟' : "Don't have an account yet?"}{' '}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                const pricingEl = document.getElementById('pricing');
+                if (pricingEl) {
+                  pricingEl.scrollIntoView({ behavior: 'smooth' });
+                }
+              }}
+              className="text-xs text-[#0D9488] font-bold hover:underline cursor-pointer"
+            >
+              {lang === 'ar' ? 'اشترك الآن واحصل على رخصتك' : 'Subscribe & Get License'}
+            </button>
+          </div>
 
         </form>
 

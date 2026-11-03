@@ -38,6 +38,10 @@ import {
   persistPricingSettings,
   PricingSettingsData
 } from "./src/db/pricing.ts";
+import {
+  loadAppSettings,
+  saveAppSettings
+} from "./src/db/appSettings.ts";
 
 dotenv.config();
 
@@ -485,9 +489,60 @@ const seedBlogPosts = [
 ];
 seedBlogPosts.forEach(p => dbBlogPosts.set(p.id, p));
 
-// Initial Tutorials (empty by default)
-const seedTutorials: any[] = [];
-seedTutorials.forEach(t => dbTutorials.set(t.id, t));
+// Initial Tutorials (Algerian Primary English Software Guides)
+const seedTutorials: any[] = [
+  {
+    id: 'tut-1',
+    titleAr: 'دليل تثبيت وتفعيل البرنامج على ويندوز (Windows 10/11)',
+    titleEn: 'Installation & Activation Guide for Windows 10/11',
+    descriptionAr: 'شرح خطوة بخطوة لكيفية تحميل ملف التثبيت (.exe)، تنصيب Teacher Mate، وإدخال مفتاح الترخيص الرسمي لتفعيل المنظومة بنجاح.',
+    videoUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ',
+    thumbnailUrl: 'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?auto=format&fit=crop&w=800&q=80',
+    duration: '04:15',
+    category: 'التثبيت والتفعيل',
+    keySteps: [
+      'تحميل ملف التثبيت من نافذة التحميل أو الرابط المعتمد',
+      'تشغيل المثبت والموافقة على التثبيت التلقائي',
+      'إدخال مفتاح الترخيص الشخصي واستلام رسالة التأكيد'
+    ],
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'tut-2',
+    titleAr: 'توليد المذكرات البيداغوجية لمادة الإنجليزية (My Book of English)',
+    titleEn: 'Generating English Lesson Plans (3AP, 4AP, 5AP)',
+    descriptionAr: 'طريقة توليد مذكرات الحصص (45 دقيقة) بمراحلها الرسمية الأربع مع استيراد محتوى الكتاب المدرسي وتصديرها بصيغة PDF و Word.',
+    videoUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ',
+    thumbnailUrl: 'https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=800&q=80',
+    duration: '06:30',
+    category: 'المذكرات البيداغوجية',
+    keySteps: [
+      'تحديد المستوى التعليمي (3AP، 4AP، 5AP)',
+      'اختيار المقطع التعليمي وعنوان الحصة',
+      'مراجعة توقيت المراحل (5د، 15د، 15د، 10د) ثم الطباعة'
+    ],
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'tut-3',
+    titleAr: 'تصدير نقاط التقويم المستمر إلى ملف الإكسل المعتمد للرقمنة الوزارية',
+    titleEn: 'Exporting Marks to Official Ministry Excel Format (.xlsx)',
+    descriptionAr: 'كيفية رصد العلامات وحساب المعدلات الفصلية لجميع الأفواج وتصدير الملف مباشرة بصيغة .xlsx المعتمدة لرفعه على فضاء الرقمنة.',
+    videoUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ',
+    thumbnailUrl: 'https://images.unsplash.com/photo-1434030216411-0b793f4b4173?auto=format&fit=crop&w=800&q=80',
+    duration: '03:45',
+    category: 'التقويم والرصد',
+    keySteps: [
+      'إدخال علامات التفاعل الشفهي والاختبار',
+      'التحقق من حساب المعدل الآلي والملاحظات',
+      'تصدير ملف الإكسل الرسمي للرقمنة بنقرة واحدة'
+    ],
+    createdAt: new Date().toISOString()
+  }
+];
+seedTutorials.forEach(t => {
+  if (!dbTutorials.has(t.id)) dbTutorials.set(t.id, t);
+});
 
 // Helper to generate license keys
 function generateLicenseKey(plan: string = 'PRO'): string {
@@ -1089,6 +1144,37 @@ app.post("/api/admin/smtp/test", async (req, res) => {
     console.error("[SMTP Test] Error:", err?.message || err);
     res.status(500).json({ error: `فشل الاتصال بخادم البريد: ${err?.message || err}` });
   }
+});
+
+// --- APP DOWNLOAD SETTINGS (WINDOWS & MAC DOWNLOAD LINKS) ---
+app.get("/api/app-settings", (_req, res) => {
+  const settings = loadAppSettings();
+  res.json(settings);
+});
+
+app.get("/api/admin/app-settings", (_req, res) => {
+  const settings = loadAppSettings();
+  res.json(settings);
+});
+
+app.post("/api/admin/app-settings", (req, res) => {
+  const { windowsDownloadUrl, macDownloadUrl, appVersion } = req.body || {};
+  const updated = saveAppSettings({
+    windowsDownloadUrl,
+    macDownloadUrl,
+    appVersion
+  });
+  res.json({ success: true, settings: updated });
+});
+
+app.put("/api/admin/app-settings", (req, res) => {
+  const { windowsDownloadUrl, macDownloadUrl, appVersion } = req.body || {};
+  const updated = saveAppSettings({
+    windowsDownloadUrl,
+    macDownloadUrl,
+    appVersion
+  });
+  res.json({ success: true, settings: updated });
 });
 
 app.post("/api/admin/users", async (req, res) => {

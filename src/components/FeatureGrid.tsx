@@ -374,6 +374,22 @@ export const FeatureGrid: React.FC<FeatureGridProps> = ({ lang }) => {
           <div className="absolute top-0 bottom-0 left-0 w-12 sm:w-24 bg-gradient-to-r from-[#F8FAFC] to-transparent z-20 pointer-events-none"></div>
           <div className="absolute top-0 bottom-0 right-0 w-12 sm:w-24 bg-gradient-to-l from-[#F8FAFC] to-transparent z-20 pointer-events-none"></div>
 
+          {/* Floating Manual Navigation Arrows */}
+          <button
+            onClick={() => handleScroll('left')}
+            className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 z-30 p-2 sm:p-2.5 rounded-full bg-white/90 hover:bg-white text-slate-700 shadow-md border border-slate-200 transition-all cursor-pointer opacity-80 hover:opacity-100 hover:scale-105"
+            aria-label="Scroll previous"
+          >
+            <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5 text-[#1E3A8A]" />
+          </button>
+          <button
+            onClick={() => handleScroll('right')}
+            className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 z-30 p-2 sm:p-2.5 rounded-full bg-white/90 hover:bg-white text-slate-700 shadow-md border border-slate-200 transition-all cursor-pointer opacity-80 hover:opacity-100 hover:scale-105"
+            aria-label="Scroll next"
+          >
+            <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5 text-[#1E3A8A]" />
+          </button>
+
           {/* Film Track (Animated keyframes rolling from one side to another) */}
           <div
             ref={scrollContainerRef}

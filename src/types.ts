@@ -267,3 +267,10 @@ export interface TutorialVideo {
   keySteps: string[];
   createdAt: string;
 }
+
+export interface AppDownloadSettings {
+  windowsDownloadUrl: string;
+  macDownloadUrl?: string;
+  appVersion?: string;
+  lastUpdated?: string;
+}

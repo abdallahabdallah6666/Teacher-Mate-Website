@@ -452,6 +452,22 @@ export const TeacherHub: React.FC<TeacherHubProps> = ({
             </div>
             )}
 
+            {tutorials.length === 0 && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center space-y-3">
+                <div className="w-14 h-14 bg-teal-50 text-[#0D9488] rounded-2xl flex items-center justify-center mx-auto shadow-2xs">
+                  <Video className="w-7 h-7" />
+                </div>
+                <h4 className="text-sm font-extrabold text-[#1E3A8A]">
+                  {lang === 'en' ? 'No video tutorials published yet' : 'لا توجد شروحات فيديو منشورة حالياً'}
+                </h4>
+                <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+                  {lang === 'en'
+                    ? 'The pedagogical team is preparing official video guides for primary English teachers.'
+                    : 'يعمل الفريق التقني والبيداغوجي على إعداد شروحات مرئية تفصيلية لتثبيت واستخدام المنظومة ومشاركتها هنا قريباً.'}
+                </p>
+              </div>
+            )}
+
           </div>
         )}
 

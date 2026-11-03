@@ -1,6 +1,7 @@
-import React from 'react';
-import { X, Download, Laptop, Monitor, Terminal } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Download, Laptop, Monitor, ExternalLink } from 'lucide-react';
 import { Language } from './Navbar';
+import { AppDownloadSettings } from '../types';
 
 interface DownloadModalProps {
   lang: Language;
@@ -14,12 +15,38 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
   isOpen,
   onClose,
 }) => {
+  const [downloadSettings, setDownloadSettings] = useState<AppDownloadSettings>({
+    windowsDownloadUrl: '',
+    macDownloadUrl: '',
+    appVersion: 'v2.4.0-DZ'
+  });
+  const [loadingSettings, setLoadingSettings] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setLoadingSettings(true);
+      fetch('/api/app-settings')
+        .then(res => res.json())
+        .then(data => {
+          if (data) {
+            setDownloadSettings({
+              windowsDownloadUrl: data.windowsDownloadUrl || '',
+              macDownloadUrl: data.macDownloadUrl || '',
+              appVersion: data.appVersion || 'v2.4.0-DZ'
+            });
+          }
+        })
+        .catch(err => console.warn('Could not load download links:', err))
+        .finally(() => setLoadingSettings(false));
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
-  const handleStartDownload = (filename: string) => {
+  const handleStartFallbackDownload = (filename: string) => {
     const element = document.createElement("a");
     const file = new Blob([
-      `Teacher Mate v2.4 Algeria Desktop Software Installer\nVersion: 2.4.0-DZ\nTarget Platform: ${filename}\nStatus: Ready for installation\n\nThank you for choosing Teacher Mate for Algerian Primary Educators!`
+      `Teacher Mate ${downloadSettings.appVersion || 'v2.4'} Algeria Desktop Software Installer\nVersion: 2.4.0-DZ\nTarget Platform: ${filename}\nStatus: Ready for installation\n\nThank you for choosing Teacher Mate for Algerian Primary Educators!`
     ], { type: 'text/plain' });
     element.href = URL.createObjectURL(file);
     element.download = filename;
@@ -28,6 +55,40 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
     document.body.removeChild(element);
   };
 
+  const handleWindowsClick = () => {
+    const customUrl = downloadSettings.windowsDownloadUrl?.trim();
+    if (customUrl) {
+      // Direct user to the link configured by admin in Admin Dashboard
+      const link = document.createElement("a");
+      link.href = customUrl;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } else {
+      // Fallback local package if no custom link is set yet
+      handleStartFallbackDownload('TeacherMate_v2.4_Setup.exe');
+    }
+  };
+
+  const handleMacClick = () => {
+    const customUrl = downloadSettings.macDownloadUrl?.trim();
+    if (customUrl) {
+      const link = document.createElement("a");
+      link.href = customUrl;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } else {
+      handleStartFallbackDownload('TeacherMate_v2.4_macOS.dmg');
+    }
+  };
+
+  const hasCustomWindowsLink = Boolean(downloadSettings.windowsDownloadUrl?.trim());
+
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-white border border-slate-200 rounded-2xl max-w-xl w-full p-6 sm:p-8 relative space-y-6 text-slate-800 shadow-xl animate-fadeIn">
@@ -35,7 +96,7 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
         {/* Close button */}
         <button
           onClick={onClose}
-          className="absolute top-4 left-4 rtl:right-4 rtl:left-auto p-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors"
+          className="absolute top-4 left-4 rtl:right-4 rtl:left-auto p-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
@@ -56,63 +117,59 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
           </p>
         </div>
 
-        {/* 3 Download Packages: Windows, Linux, Mac OS */}
+        {/* 2 Supported Download Packages: Windows & Mac OS (Linux removed) */}
         <div className="space-y-3">
           
-          {/* Windows Option */}
-          <div className="p-4 bg-[#F8FAFC] rounded-lg border border-teal-300 flex items-center justify-between gap-4 hover:border-[#0D9488] transition-colors shadow-sm">
+          {/* Windows Option (Primary) */}
+          <div className="p-4 bg-[#F8FAFC] rounded-xl border-2 border-teal-500/40 flex items-center justify-between gap-4 hover:border-[#0D9488] transition-all shadow-sm">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-md bg-teal-50 text-[#0D9488] border border-teal-200">
+              <div className="p-2.5 rounded-xl bg-teal-50 text-[#0D9488] border border-teal-200 shadow-2xs">
                 <Monitor className="w-6 h-6" />
               </div>
               <div>
-                <h4 className="text-sm font-bold text-[#1E3A8A]">Windows (.exe)</h4>
-                <p className="text-[11px] text-slate-500">Windows 10 / 11</p>
+                <div className="flex items-center gap-2">
+                  <h4 className="text-sm font-extrabold text-[#1E3A8A]">Windows (.exe)</h4>
+                  <span className="px-2 py-0.5 bg-teal-50 text-[#0D9488] border border-teal-200 rounded text-[10px] font-bold">
+                    {lang === 'ar' ? 'الإصدار الموصى به' : 'Recommended'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Windows 10 / 11 · 64-bit · {downloadSettings.appVersion || 'v2.4.0'}
+                </p>
               </div>
             </div>
+            
             <button
-              onClick={() => handleStartDownload('TeacherCompanion_v2.4_Setup.exe')}
-              className="px-4 py-2 bg-[#0D9488] hover:bg-teal-700 text-white font-bold text-xs rounded-md shadow-sm transition-colors"
+              onClick={handleWindowsClick}
+              className="px-5 py-2.5 bg-[#0D9488] hover:bg-teal-700 text-white font-extrabold text-xs rounded-xl shadow-sm transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shrink-0"
+              title={hasCustomWindowsLink ? (lang === 'ar' ? 'التحميل من الرابط المعتمد' : 'Download from configured link') : (lang === 'ar' ? 'تحميل مباشر' : 'Download directly')}
             >
-              {lang === 'ar' ? 'تحميل' : 'Download'}
-            </button>
-          </div>
-
-          {/* Linux Option */}
-          <div className="p-4 bg-[#F8FAFC] rounded-lg border border-slate-200 flex items-center justify-between gap-4 hover:border-[#0D9488] transition-colors">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-md bg-blue-50 text-[#1E3A8A] border border-blue-200">
-                <Terminal className="w-6 h-6" />
-              </div>
-              <div>
-                <h4 className="text-sm font-bold text-[#1E3A8A]">Linux (.AppImage / .deb)</h4>
-                <p className="text-[11px] text-slate-500">Ubuntu / Debian / Fedora</p>
-              </div>
-            </div>
-            <button
-              onClick={() => handleStartDownload('TeacherCompanion_v2.4_Linux.AppImage')}
-              className="px-4 py-2 bg-[#1E3A8A] hover:bg-blue-900 text-white font-bold text-xs rounded-md shadow-sm transition-colors"
-            >
-              {lang === 'ar' ? 'تحميل' : 'Download'}
+              {hasCustomWindowsLink ? (
+                <ExternalLink className="w-4 h-4" />
+              ) : (
+                <Download className="w-4 h-4" />
+              )}
+              <span>{lang === 'ar' ? 'تحميل للويندوز' : 'Download for Windows'}</span>
             </button>
           </div>
 
           {/* Mac OS Option */}
-          <div className="p-4 bg-[#F8FAFC] rounded-lg border border-slate-200 flex items-center justify-between gap-4 hover:border-[#0D9488] transition-colors">
+          <div className="p-4 bg-[#F8FAFC] rounded-xl border border-slate-200 flex items-center justify-between gap-4 hover:border-[#1E3A8A] transition-all">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-md bg-purple-50 text-purple-700 border border-purple-200">
+              <div className="p-2.5 rounded-xl bg-purple-50 text-purple-700 border border-purple-200 shadow-2xs">
                 <Laptop className="w-6 h-6" />
               </div>
               <div>
-                <h4 className="text-sm font-bold text-[#1E3A8A]">Mac OS (.dmg)</h4>
-                <p className="text-[11px] text-slate-500">Apple Silicon & Intel</p>
+                <h4 className="text-sm font-extrabold text-[#1E3A8A]">Mac OS (.dmg)</h4>
+                <p className="text-[11px] text-slate-500 mt-0.5">Apple Silicon (M1/M2/M3/M4) & Intel</p>
               </div>
             </div>
             <button
-              onClick={() => handleStartDownload('TeacherCompanion_v2.4_macOS.dmg')}
-              className="px-4 py-2 bg-[#1E3A8A] hover:bg-blue-900 text-white font-bold text-xs rounded-md shadow-sm transition-colors"
+              onClick={handleMacClick}
+              className="px-4 py-2 bg-[#1E3A8A] hover:bg-blue-900 text-white font-bold text-xs rounded-xl shadow-sm transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
             >
-              {lang === 'ar' ? 'تحميل' : 'Download'}
+              <Download className="w-4 h-4" />
+              <span>{lang === 'ar' ? 'تحميل للماك' : 'Download for Mac'}</span>
             </button>
           </div>
 
