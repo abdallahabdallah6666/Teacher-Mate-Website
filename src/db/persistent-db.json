@@ -23,6 +23,24 @@
         "maxDevices": 1,
         "invoiceNumber": "INV-2026-ABD101"
       }
+    ],
+    [
+      "sami.algeria.demo@example.com",
+      {
+        "id": "user-1793882591904",
+        "fullName": "أستاذ سامي الجزائري",
+        "email": "sami.algeria.demo@example.com",
+        "password": "SamiPassword123!",
+        "phoneNumber": "0770112233",
+        "role": "user",
+        "wilaya": "25 - قسنطينة",
+        "primaryGrade": "3AP",
+        "licenseStatus": "trial",
+        "licensePlan": "pro",
+        "createdAt": "2026-11-05T12:43:11.904Z",
+        "expiresAt": "2027-11-05",
+        "maxDevices": 1
+      }
     ]
   ],
   "licenses": [
@@ -49,9 +67,11 @@
       "inq-1792370107209",
       {
         "id": "inq-1792370107209",
+        "inquiryId": "inq-1792370107209",
         "userId": "guest",
         "userEmail": "testteacher@example.com",
         "userName": "Teacher Amina",
+        "phone": "",
         "wilaya": "31 - وهران",
         "subject": "🚨 [طوارئ SOS] Need help activating license",
         "category": "🚨 بلاغ عاجل جداً (SOS Priority)",
@@ -59,9 +79,10 @@
         "status": "replied",
         "isSOS": true,
         "priority": "urgent",
-        "createdAt": "2026-10-19T00:35:07.209Z",
         "adminReply": "تم التحقق وتفعيل رخصتك بنجاح، يمكنك الآن استخدام البرنامج على حاسوبك.",
-        "repliedAt": "2026-10-19T00:35:13.804Z"
+        "repliedAt": "2026-10-19T00:35:13.804Z",
+        "closedAt": null,
+        "createdAt": "2026-11-05T12:08:45.822Z"
       }
     ]
   ],
@@ -73,9 +94,106 @@
         "discountPercent": 10,
         "isActive": 1,
         "uses": 0,
-        "maxUses": 100
+        "maxUses": 100,
+        "expirationDate": null,
+        "createdAt": "2026-11-05T12:08:45.804Z",
+        "updatedAt": "2026-11-05T12:08:45.804Z"
       }
     ]
   ],
-  "tutorials": []
+  "tutorials": [],
+  "blogPosts": [
+    [
+      "post-1",
+      {
+        "id": "post-1",
+        "slug": "preparing-english-fiches-ai-3ap-4ap-5ap",
+        "titleAr": "كيف تنجز مذكرات اللغة الإنجليزية الرسمية (English AI Fiches) وفق كتاب My Book of English؟",
+        "titleFr": "Comment préparer une fiche d'Anglais officielle (3AP, 4AP, 5AP) avec l'IA en un clic ?",
+        "titleEn": "How to prepare official English lesson plans (3AP, 4AP, 5AP) using AI according to My Book of English?",
+        "excerptAr": "اكتشف كيف يساعد تطبيق \"Teacher Companion - English Edition\" أستاذ الإنجليزية بالابتدائي في الجزائر في إعداد مذكرات الصوتيات Phonics، المحادثة الشفهية، والأنشطة الكتابية.",
+        "excerptFr": "Découvrez comment Teacher Companion aide les enseignants d'anglais du primaire en Algérie à concevoir des fiches pédagogiques alignées sur le manuel officiel.",
+        "excerptEn": "Discover how Teacher Companion helps Algerian primary English teachers design lesson plans aligned with official textbooks.",
+        "category": "تدريس الإنجليزية",
+        "publishDate": "10 أوت 2026",
+        "readTime": "4 دقائق",
+        "author": "أ. مريم المفتشة التربوية للغة الإنجليزية",
+        "imageUrl": "https://images.unsplash.com/photo-1580582932707-520aed937b7b?auto=format&fit=crop&w=800&q=80",
+        "contentAr": "تعتبر المذكرة التربوية لمادة اللغة الإنجليزية (Lesson Plan / Fiche Pédagogique) ركناً أساسياً لأستاذ اللغة الإنجليزية بالتعليم الابتدائي بالجزائر (3AP, 4AP, 5AP). ومع تطبيق منهاج \"My Book of English\"، يتطلب إعداد الدرس دقة في توزيع المراحل البيداغوجية: Warm-up, Presentation, Practice, & Production.\n\nيقدم برنامج **Teacher Companion (English Edition)** المساعد الذكي المدعوم بالذكاء الاصطناعي والمصمم خصيصاً وفق المنهاج الوزاري الرسمي.\n\n### أهم ميزات وحدة مذكرات الإنجليزية:\n1. **التوافق التام مع المقاطع الرسمية:** اختيار Sequence والمادة للسنوات 3AP، 4AP، و 5AP.\n2. **صياغة الصوتيات ومخارج الحروف (Phonics):** توفير بطاقات الفونكس وأوراق العمل المرفقة.\n3. **توليد الحوارات والثنائيات (Pair-work Dialogues):** إنشاء سيناريوهات محادثة تفاعلية مناسبة لمستوى التلاميذ.\n4. **التصدير الفوري:** طباعة وتصدير بصيغة PDF أو Word للتعديل الشخصي.",
+        "likesCount": 24,
+        "helpfulCount": 18,
+        "comments": [
+          {
+            "id": "c-1",
+            "userName": "أستاذ ياسين (ولاية سطيف)",
+            "userRole": "أستاذ سنة 4 ابتدائية",
+            "userWilaya": "19 - سطيف",
+            "content": "تطبيق ممتااااز جداً! وفر علي عناء تحضير مذكرات الصوتيات Phonics والمقطع الثاني باللغة الإنجليزية.",
+            "createdAt": "11 أوت 2026 - 14:30"
+          },
+          {
+            "id": "c-2",
+            "userName": "أستاذة مريم (ولاية وهران)",
+            "userRole": "أستاذة إنجليزية 3AP/5AP",
+            "userWilaya": "31 - وهران",
+            "content": "بارك الله فيكم، التصدير لملفات Word وافقت عليه مفتشة المادة دون أي ملاحظات سلبيّة.",
+            "createdAt": "12 أوت 2026 - 09:15"
+          }
+        ]
+      }
+    ],
+    [
+      "post-2",
+      {
+        "id": "post-2",
+        "slug": "guide-primary-english-assessment-5ap",
+        "titleAr": "دليل تقييم مكتسبات مادة اللغة الإنجليزية للسنة الخامسة ابتدائي (5AP English Evaluation)",
+        "titleFr": "Guide d'évaluation des acquis en Anglais 5AP pour les enseignants du primaire",
+        "titleEn": "Primary 5AP English Competency Assessment & Evaluation Guide",
+        "excerptAr": "شرح مفصل لمعايير تقييم الكفاءات الشفهية والكتابية وحساب النتائج والتقديرات الرسمية (أ، ب، ج، د) لمادة اللغة الإنجليزية.",
+        "excerptFr": "Explication détaillée des critères d'évaluation des compétences orales et écrites en anglais 5AP.",
+        "excerptEn": "Detailed guide on oral & written evaluation criteria and automated grading for 5AP English.",
+        "category": "تقييم المكتسبات",
+        "publishDate": "02 أوت 2026",
+        "readTime": "6 دقائق",
+        "author": "فريق التطوير البيداغوجي للغات",
+        "imageUrl": "https://images.unsplash.com/photo-1434030216411-0b793f4b4173?auto=format&fit=crop&w=800&q=80",
+        "contentAr": "يشكل تقييم مكتسبات مادة اللغة الإنجليزية للسنة الخامسة ابتدائي ركيزة أساسية لقياس مدى استيعاب المفردات، التفاعل الشفهي، وفهم النصوص البسيطة.\n\nيوفر تطبيق Teacher Companion دفتر تنقيط إلكتروني متوافق مع الميادين الأربعة: Listening, Speaking, Reading, and Writing، مما يوفر على الأستاذ ساعات طوال في حساب المعدلات وصياغة التقديرات البيداغوجية المعتمدة.",
+        "likesCount": 31,
+        "helpfulCount": 22,
+        "comments": [
+          {
+            "id": "c-3",
+            "userName": "أستاذ طارق (ولاية باتنة)",
+            "userRole": "أستاذ لغة إنجليزية",
+            "userWilaya": "05 - باتنة",
+            "content": "دفتر تنقيط المكتسبات يحسب التقديرات تلقائياً وبدقة عالية جداً. شكراً جزيلاً.",
+            "createdAt": "03 أوت 2026 - 18:20"
+          }
+        ]
+      }
+    ],
+    [
+      "post-3",
+      {
+        "id": "post-3",
+        "slug": "chargily-pay-edahabia-english-license",
+        "titleAr": "كيف تشترِ وتفعّل رخصة \"رفيق أستاذ الإنجليزية\" فورياً بالبطاقة الذهبية عبر Chargily Pay؟",
+        "titleFr": "Comment activer votre licence Teacher Companion - English Edition via Chargily Pay ?",
+        "titleEn": "How to purchase & activate your Teacher Companion license via Chargily Pay (Edahabia / CIB)",
+        "excerptAr": "خطوات سهلة وآمنة لشراء رخصة الاستخدام بالبطاقة الذهبية CIB والحصول على مفتاح التفعيل الفوري لأستاذ الإنجليزية.",
+        "excerptFr": "Étapes simples pour acheter votre licence via le paiement électronique algérien Chargily Pay.",
+        "excerptEn": "Simple and secure steps to buy your license with Edahabia card and obtain your instant serial key.",
+        "category": "تحديثات التطبيق",
+        "publishDate": "25 جولية 2026",
+        "readTime": "3 دقائق",
+        "author": "قسم الدعم الفني",
+        "imageUrl": "https://images.unsplash.com/photo-1556742049-0a67e889b4f2?auto=format&fit=crop&w=800&q=80",
+        "contentAr": "يمكن لأساتذة اللغة الإنجليزية في جميع الولايات تفعيل البرنامج فورياً باستخدام Chargily Pay v2 المعتمدة رسمياً بالبطاقة الذهبية (Edahabia) وبطاقات CIB البنكية.",
+        "likesCount": 19,
+        "helpfulCount": 15,
+        "comments": []
+      }
+    ]
+  ]
 }

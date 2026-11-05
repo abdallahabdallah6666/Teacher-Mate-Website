@@ -102,6 +102,23 @@ export interface PricingSettings {
   };
 }
 
+export interface DownloadSettings {
+  windowsUrl: string;
+  macUrl: string;
+  version: string;
+  releaseDate?: string;
+  notesAr?: string;
+  notesEn?: string;
+  updatedAt?: string;
+}
+
+export type AppDownloadSettings = {
+  windowsDownloadUrl?: string;
+  macDownloadUrl?: string;
+  appVersion?: string;
+  lastUpdated?: string;
+};
+
 export interface LicenseRecord {
   id: string;
   key: string;
@@ -266,11 +283,4 @@ export interface TutorialVideo {
   category?: string;
   keySteps: string[];
   createdAt: string;
-}
-
-export interface AppDownloadSettings {
-  windowsDownloadUrl: string;
-  macDownloadUrl?: string;
-  appVersion?: string;
-  lastUpdated?: string;
 }

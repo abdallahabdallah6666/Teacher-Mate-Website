@@ -1,0 +1,137 @@
+{
+  "entities": {
+    "users": {
+      "title": "UserProfile",
+      "description": "User profile with role, primary grade, wilaya, and license status",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "fullName": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "admin"] },
+        "wilaya": { "type": "string" },
+        "primaryGrade": { "type": "string" },
+        "schoolName": { "type": "string" },
+        "licenseKey": { "type": "string" },
+        "licenseStatus": { "type": "string", "enum": ["trial", "active", "expired"] },
+        "licensePlan": { "type": "string" },
+        "isBlocked": { "type": "boolean" },
+        "isFlagged": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "fullName"]
+    },
+    "licenses": {
+      "title": "LicenseRecord",
+      "description": "Desktop software activation license details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "key": { "type": "string" },
+        "userEmail": { "type": "string", "format": "email" },
+        "userName": { "type": "string" },
+        "plan": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "revoked", "expired"] },
+        "issuedAt": { "type": "string" },
+        "expiresAt": { "type": "string" },
+        "paidVia": { "type": "string" },
+        "amountDZD": { "type": "number" },
+        "maxDevices": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["key", "userEmail", "status"]
+    },
+    "promoCodes": {
+      "title": "PromoCode",
+      "description": "Discount codes for subscriptions and license checkout",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "discountPercent": { "type": "number" },
+        "isActive": { "type": "number" },
+        "uses": { "type": "number" },
+        "maxUses": { "type": "number" },
+        "expirationDate": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "discountPercent"]
+    },
+    "inquiries": {
+      "title": "SupportInquiry",
+      "description": "Pedagogical questions, technical support, and SOS emergency requests",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userEmail": { "type": "string", "format": "email" },
+        "userName": { "type": "string" },
+        "wilaya": { "type": "string" },
+        "subject": { "type": "string" },
+        "category": { "type": "string" },
+        "message": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "replied", "closed"] },
+        "isSOS": { "type": "boolean" },
+        "adminReply": { "type": "string" },
+        "repliedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userEmail", "subject", "message"]
+    },
+    "pricingSettings": {
+      "title": "PricingSettings",
+      "description": "Configurable subscription tiers and promo banners",
+      "type": "object",
+      "properties": {
+        "currencyDZD": { "type": "string" },
+        "promoNoticeAr": { "type": "string" },
+        "promoNoticeEn": { "type": "string" },
+        "plans": { "type": "object" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["currencyDZD"]
+    },
+    "downloadSettings": {
+      "title": "DownloadSettings",
+      "description": "Configurable installer URLs for Windows and Mac OS",
+      "type": "object",
+      "properties": {
+        "windowsUrl": { "type": "string" },
+        "macUrl": { "type": "string" },
+        "version": { "type": "string" },
+        "releaseDate": { "type": "string" },
+        "notesAr": { "type": "string" },
+        "notesEn": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["windowsUrl", "macUrl", "version"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/users" },
+      "description": "User profiles and educator accounts"
+    },
+    "/licenses/{licenseKey}": {
+      "schema": { "$ref": "#/entities/licenses" },
+      "description": "Software license activations"
+    },
+    "/promoCodes/{code}": {
+      "schema": { "$ref": "#/entities/promoCodes" },
+      "description": "Promotional discount codes"
+    },
+    "/inquiries/{inquiryId}": {
+      "schema": { "$ref": "#/entities/inquiries" },
+      "description": "Support tickets and SOS requests"
+    },
+    "/pricingSettings/{id}": {
+      "schema": { "$ref": "#/entities/pricingSettings" },
+      "description": "Subscription pricing settings"
+    },
+    "/downloadSettings/{id}": {
+      "schema": { "$ref": "#/entities/downloadSettings" },
+      "description": "Desktop installer download URLs"
+    }
+  }
+}

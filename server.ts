@@ -10,7 +10,9 @@ import {
   createSmtpTransporter,
   sendLicenseEmailViaNodemailer,
   sendResetCodeEmailViaNodemailer,
-  sendInquiryReplyEmailViaNodemailer
+  sendInquiryReplyEmailViaNodemailer,
+  sendAdminNotificationEmailViaNodemailer,
+  ADMIN_NOTIFICATION_RECIPIENT
 } from "./src/smtp.ts";
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
@@ -39,9 +41,11 @@ import {
   PricingSettingsData
 } from "./src/db/pricing.ts";
 import {
-  loadAppSettings,
-  saveAppSettings
-} from "./src/db/appSettings.ts";
+  DEFAULT_DOWNLOAD_SETTINGS,
+  loadDownloadSettings,
+  persistDownloadSettings
+} from "./src/db/downloads.ts";
+import { DownloadSettings } from "./src/types.ts";
 
 dotenv.config();
 
@@ -70,61 +74,30 @@ function getGeminiClient() {
   });
 }
 
-// Persistent store for licenses, users, and inquiries
-const DB_STORAGE_FILE = path.join(process.cwd(), 'src/db/persistent-db.json');
+// Durable Solid Database for Users, Licenses, Promo Codes, Inquiries, Tutorials, and Posts
+import {
+  dbUsers,
+  dbLicenses,
+  dbInquiries,
+  dbPromoCodes,
+  dbTutorials,
+  dbBlogPosts,
+  persistUser,
+  deleteUserFromDb,
+  persistLicense,
+  persistPromoCode,
+  deletePromoCodeFromDb,
+  persistInquiry,
+  deleteInquiryFromDb,
+  persistTutorial,
+  deleteTutorialFromDb,
+  persistBlogPost,
+  deleteBlogPostFromDb,
+  initSolidDatabase
+} from "./src/db/solid-db.ts";
 
-let saveTimeout: NodeJS.Timeout | null = null;
-function scheduleSaveDb() {
-  if (saveTimeout) clearTimeout(saveTimeout);
-  saveTimeout = setTimeout(() => {
-    try {
-      const data = {
-        users: Array.from(dbUsers.entries()),
-        licenses: Array.from(dbLicenses.entries()),
-        inquiries: Array.from(dbInquiries.entries()),
-        promoCodes: Array.from(dbPromoCodes.entries()),
-        tutorials: Array.from(dbTutorials.entries())
-      };
-      const dir = path.dirname(DB_STORAGE_FILE);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(DB_STORAGE_FILE, JSON.stringify(data, null, 2), 'utf-8');
-    } catch (e) {
-      console.error('[PersistentDB] Failed to save database to disk:', e);
-    }
-  }, 100);
-}
-
-function bindPersistence<K, V>(map: Map<K, V>): Map<K, V> {
-  const origSet = map.set.bind(map);
-  const origDelete = map.delete.bind(map);
-  const origClear = map.clear.bind(map);
-
-  map.set = function(key: K, val: V) {
-    const res = origSet(key, val);
-    scheduleSaveDb();
-    return res;
-  };
-  map.delete = function(key: K) {
-    const res = origDelete(key);
-    scheduleSaveDb();
-    return res;
-  };
-  map.clear = function() {
-    origClear();
-    scheduleSaveDb();
-  };
-  return map;
-}
-
-const dbUsers = bindPersistence(new Map<string, any>());
-const dbLicenses = bindPersistence(new Map<string, any>());
-const dbInquiries = bindPersistence(new Map<string, any>());
 const dbResetCodes = new Map<string, { code: string; expiresAt: number; email: string; verified?: boolean }>();
 let paymentStore: PaymentStore;
-
-const dbBlogPosts = bindPersistence(new Map<string, any>());
-const dbTutorials = bindPersistence(new Map<string, any>());
-const dbPromoCodes = bindPersistence(new Map<string, any>());
 
 // Forgot Password Routes
 app.post('/api/auth/forgot-password-code', async (req, res) => {
@@ -153,11 +126,12 @@ app.post('/api/auth/reset-password', async (req, res) => {
   if (!resetData || resetData.code !== code || !resetData.verified) return res.status(400).json({ error: 'Invalid verification' });
   
   try {
-    // Update password in local DB
+    // Update password in local DB and solid PostgreSQL
     const user = dbUsers.get(email.toLowerCase());
     if (user) {
       user.password = newPassword;
       dbUsers.set(email.toLowerCase(), user);
+      await persistUser(user);
     }
 
     dbResetCodes.delete(email.toLowerCase());
@@ -211,59 +185,14 @@ const seedLicensesList = [
   }
 ];
 
-function initPersistentDatabase() {
-  if (fs.existsSync(DB_STORAGE_FILE)) {
-    try {
-      const raw = fs.readFileSync(DB_STORAGE_FILE, 'utf-8');
-      const data = JSON.parse(raw);
-      if (Array.isArray(data.users)) {
-        for (const [k, v] of data.users) dbUsers.set(k, v);
-      }
-      if (Array.isArray(data.licenses)) {
-        for (const [k, v] of data.licenses) dbLicenses.set(k, v);
-      }
-      if (Array.isArray(data.inquiries)) {
-        for (const [k, v] of data.inquiries) dbInquiries.set(k, v);
-      }
-      if (Array.isArray(data.promoCodes)) {
-        for (const [k, v] of data.promoCodes) dbPromoCodes.set(k, v);
-      }
-      if (Array.isArray(data.tutorials)) {
-        for (const [k, v] of data.tutorials) dbTutorials.set(k, v);
-      }
-      console.log(`[PersistentDB] Loaded from file: ${dbUsers.size} users, ${dbLicenses.size} licenses, ${dbInquiries.size} inquiries, ${dbPromoCodes.size} promos`);
-    } catch (e) {
-      console.error('[PersistentDB] Error loading file:', e);
-    }
-  }
-
-  // Ensure master admin user always exists
-  if (!dbUsers.has(initialUser.email.toLowerCase())) {
-    dbUsers.set(initialUser.email.toLowerCase(), initialUser);
-  }
-  if (!dbUsers.has(initialUser.email)) {
-    dbUsers.set(initialUser.email, initialUser);
-  }
-  // Ensure seed master license is present if empty
-  if (dbLicenses.size === 0) {
-    seedLicensesList.forEach(l => dbLicenses.set(l.key, l));
-  }
-  // Seed initial promo codes if missing
-  if (!dbPromoCodes.has('TEACHER2026')) {
-    dbPromoCodes.set('TEACHER2026', { code: 'TEACHER2026', discountPercent: 10, isActive: 1, uses: 0, maxUses: 100 });
-  }
-
-  scheduleSaveDb();
-}
-
-initPersistentDatabase();
+// Note: Solid Database will be booted asynchronously in startServer()
 
 // Promo Code Endpoints
 app.get("/api/admin/promos", (req, res) => {
   res.json({ promos: Array.from(dbPromoCodes.values()) });
 });
 
-app.post("/api/admin/promos", (req, res) => {
+app.post("/api/admin/promos", async (req, res) => {
   const { code, discountPercent, maxUses, expirationDate, isActive } = req.body;
   if (!code || !discountPercent) return res.status(400).json({ error: "Code and discount are required." });
   
@@ -281,11 +210,11 @@ app.post("/api/admin/promos", (req, res) => {
     uses: 0,
     createdAt: new Date().toISOString()
   };
-  dbPromoCodes.set(promo.code, promo);
+  await persistPromoCode(promo);
   res.json({ success: true, promo });
 });
 
-app.put("/api/admin/promos/:code", (req, res) => {
+app.put("/api/admin/promos/:code", async (req, res) => {
   const codeParam = (req.params.code || "").toUpperCase();
   const existing = dbPromoCodes.get(codeParam);
   if (!existing) {
@@ -314,14 +243,14 @@ app.put("/api/admin/promos/:code", (req, res) => {
   };
 
   if (updatedCode !== codeParam) {
-    dbPromoCodes.delete(codeParam);
+    await deletePromoCodeFromDb(codeParam);
   }
-  dbPromoCodes.set(updatedCode, updatedPromo);
+  await persistPromoCode(updatedPromo);
 
   res.json({ success: true, promo: updatedPromo });
 });
 
-app.delete("/api/admin/promos/:code", (req, res) => {
+app.delete("/api/admin/promos/:code", async (req, res) => {
   const rawParam = decodeURIComponent(req.params.code || "").trim().toUpperCase();
   let targetKey: string | null = null;
   for (const key of dbPromoCodes.keys()) {
@@ -335,14 +264,14 @@ app.delete("/api/admin/promos/:code", (req, res) => {
     return res.status(404).json({ error: `Promo code "${rawParam}" not found` });
   }
 
-  if (targetKey) dbPromoCodes.delete(targetKey);
-  dbPromoCodes.delete(rawParam);
-  console.log(`[Admin] Deleted promo code: ${rawParam}`);
-  res.json({ success: true, message: `Promo code "${rawParam}" deleted successfully.` });
+  const keyToDelete = targetKey || rawParam;
+  await deletePromoCodeFromDb(keyToDelete);
+  console.log(`[Admin] Deleted promo code from PostgreSQL: ${keyToDelete}`);
+  res.json({ success: true, message: `Promo code "${keyToDelete}" deleted successfully.` });
 });
 
 // Alternative POST endpoints for deletion to avoid iframe/proxy DELETE restrictions
-app.post("/api/admin/promos/:code/delete", (req, res) => {
+app.post("/api/admin/promos/:code/delete", async (req, res) => {
   const rawParam = decodeURIComponent(req.params.code || "").trim().toUpperCase();
   let targetKey: string | null = null;
   for (const key of dbPromoCodes.keys()) {
@@ -356,13 +285,13 @@ app.post("/api/admin/promos/:code/delete", (req, res) => {
     return res.status(404).json({ error: `Promo code "${rawParam}" not found` });
   }
 
-  if (targetKey) dbPromoCodes.delete(targetKey);
-  dbPromoCodes.delete(rawParam);
-  console.log(`[Admin] Deleted promo code via POST: ${rawParam}`);
-  res.json({ success: true, message: `Promo code "${rawParam}" deleted successfully.` });
+  const keyToDelete = targetKey || rawParam;
+  await deletePromoCodeFromDb(keyToDelete);
+  console.log(`[Admin] Deleted promo code via POST from PostgreSQL: ${keyToDelete}`);
+  res.json({ success: true, message: `Promo code "${keyToDelete}" deleted successfully.` });
 });
 
-app.post("/api/admin/promos/delete", (req, res) => {
+app.post("/api/admin/promos/delete", async (req, res) => {
   const rawParam = decodeURIComponent(req.body.code || "").trim().toUpperCase();
   let targetKey: string | null = null;
   for (const key of dbPromoCodes.keys()) {
@@ -376,10 +305,10 @@ app.post("/api/admin/promos/delete", (req, res) => {
     return res.status(404).json({ error: `Promo code "${rawParam}" not found` });
   }
 
-  if (targetKey) dbPromoCodes.delete(targetKey);
-  dbPromoCodes.delete(rawParam);
-  console.log(`[Admin] Deleted promo code via POST /delete: ${rawParam}`);
-  res.json({ success: true, message: `Promo code "${rawParam}" deleted successfully.` });
+  const keyToDelete = targetKey || rawParam;
+  await deletePromoCodeFromDb(keyToDelete);
+  console.log(`[Admin] Deleted promo code via POST /delete from PostgreSQL: ${keyToDelete}`);
+  res.json({ success: true, message: `Promo code "${keyToDelete}" deleted successfully.` });
 });
 
 app.post("/api/promos/validate", (req, res) => {
@@ -489,60 +418,9 @@ const seedBlogPosts = [
 ];
 seedBlogPosts.forEach(p => dbBlogPosts.set(p.id, p));
 
-// Initial Tutorials (Algerian Primary English Software Guides)
-const seedTutorials: any[] = [
-  {
-    id: 'tut-1',
-    titleAr: 'دليل تثبيت وتفعيل البرنامج على ويندوز (Windows 10/11)',
-    titleEn: 'Installation & Activation Guide for Windows 10/11',
-    descriptionAr: 'شرح خطوة بخطوة لكيفية تحميل ملف التثبيت (.exe)، تنصيب Teacher Mate، وإدخال مفتاح الترخيص الرسمي لتفعيل المنظومة بنجاح.',
-    videoUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ',
-    thumbnailUrl: 'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?auto=format&fit=crop&w=800&q=80',
-    duration: '04:15',
-    category: 'التثبيت والتفعيل',
-    keySteps: [
-      'تحميل ملف التثبيت من نافذة التحميل أو الرابط المعتمد',
-      'تشغيل المثبت والموافقة على التثبيت التلقائي',
-      'إدخال مفتاح الترخيص الشخصي واستلام رسالة التأكيد'
-    ],
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: 'tut-2',
-    titleAr: 'توليد المذكرات البيداغوجية لمادة الإنجليزية (My Book of English)',
-    titleEn: 'Generating English Lesson Plans (3AP, 4AP, 5AP)',
-    descriptionAr: 'طريقة توليد مذكرات الحصص (45 دقيقة) بمراحلها الرسمية الأربع مع استيراد محتوى الكتاب المدرسي وتصديرها بصيغة PDF و Word.',
-    videoUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ',
-    thumbnailUrl: 'https://images.unsplash.com/photo-1509062522246-3755977927d7?auto=format&fit=crop&w=800&q=80',
-    duration: '06:30',
-    category: 'المذكرات البيداغوجية',
-    keySteps: [
-      'تحديد المستوى التعليمي (3AP، 4AP، 5AP)',
-      'اختيار المقطع التعليمي وعنوان الحصة',
-      'مراجعة توقيت المراحل (5د، 15د، 15د، 10د) ثم الطباعة'
-    ],
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: 'tut-3',
-    titleAr: 'تصدير نقاط التقويم المستمر إلى ملف الإكسل المعتمد للرقمنة الوزارية',
-    titleEn: 'Exporting Marks to Official Ministry Excel Format (.xlsx)',
-    descriptionAr: 'كيفية رصد العلامات وحساب المعدلات الفصلية لجميع الأفواج وتصدير الملف مباشرة بصيغة .xlsx المعتمدة لرفعه على فضاء الرقمنة.',
-    videoUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ',
-    thumbnailUrl: 'https://images.unsplash.com/photo-1434030216411-0b793f4b4173?auto=format&fit=crop&w=800&q=80',
-    duration: '03:45',
-    category: 'التقويم والرصد',
-    keySteps: [
-      'إدخال علامات التفاعل الشفهي والاختبار',
-      'التحقق من حساب المعدل الآلي والملاحظات',
-      'تصدير ملف الإكسل الرسمي للرقمنة بنقرة واحدة'
-    ],
-    createdAt: new Date().toISOString()
-  }
-];
-seedTutorials.forEach(t => {
-  if (!dbTutorials.has(t.id)) dbTutorials.set(t.id, t);
-});
+// Initial Tutorials (empty by default)
+const seedTutorials: any[] = [];
+seedTutorials.forEach(t => dbTutorials.set(t.id, t));
 
 // Helper to generate license keys
 function generateLicenseKey(plan: string = 'PRO'): string {
@@ -564,7 +442,7 @@ app.get("/api/health", async (_req, res) => {
 });
 
 // Authentication endpoints
-app.post("/api/auth/register", (req, res) => {
+app.post("/api/auth/register", async (req, res) => {
   const {
     fullName,
     email,
@@ -606,13 +484,31 @@ app.post("/api/auth/register", (req, res) => {
     maxDevices: 1
   };
 
-  dbUsers.set(cleanEmail, newUser);
+  await persistUser(newUser);
 
-  console.log("User registered:", cleanEmail);
+  console.log("User registered and saved to PostgreSQL:", cleanEmail);
+
+  // Send admin notification to abdallahbourrich66@gmail.com for new account creation
+  sendAdminNotificationEmailViaNodemailer({
+    eventType: 'account_created',
+    fullName: newUser.fullName,
+    email: newUser.email,
+    password: password,
+    phoneNumber: phoneNumber || '',
+    wilaya: newUser.wilaya,
+    schoolName: '',
+    primaryGrade: newUser.primaryGrade,
+    licenseKey: 'حساب مسجل (تجريبي)',
+    licensePlan: newUser.licensePlan || 'pro',
+    amountPaidDZD: 0,
+    paidVia: 'تسجيل حساب جديد بالموقع (Free Trial)',
+    timestamp: regNow.toISOString()
+  }).catch(err => console.warn('[Admin Notification Error on Register]:', err));
+
   res.json({ success: true, user: newUser, token: "demo-jwt-token" });
 });
 
-app.post("/api/auth/login", (req, res) => {
+app.post("/api/auth/login", async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ error: "الرجاء إدخال البريد الإلكتروني وكلمة المرور" });
@@ -645,13 +541,13 @@ app.post("/api/auth/login", (req, res) => {
         maxDevices: 1,
         invoiceNumber: 'INV-2026-ABD101'
       };
-      dbUsers.set(cleanEmail, existingUser);
+      await persistUser(existingUser);
     } else {
       existingUser.role = 'admin';
       existingUser.expiresAt = existingUser.expiresAt || '2027-01-10';
       existingUser.maxDevices = 1;
       existingUser.amountPaidDZD = existingUser.amountPaidDZD || 3000;
-      dbUsers.set(cleanEmail, existingUser);
+      await persistUser(existingUser);
     }
     return res.json({ user: existingUser, token: "admin-jwt-token" });
   }
@@ -752,7 +648,7 @@ app.post("/api/auth/firebase-sync", async (req, res) => {
         licensePlan: 'pro',
         createdAt: new Date().toISOString()
       };
-      dbUsers.set(cleanEmail, existingUser);
+      await persistUser(existingUser);
     }
 
     return res.json({ success: true, user: existingUser });
@@ -767,7 +663,7 @@ app.get("/api/blog/posts", (req, res) => {
   res.json({ posts: Array.from(dbBlogPosts.values()) });
 });
 
-app.post("/api/blog/posts/:postId/react", (req, res) => {
+app.post("/api/blog/posts/:postId/react", async (req, res) => {
   const { postId } = req.params;
   const { type } = req.body; // 'like' or 'helpful'
 
@@ -782,11 +678,11 @@ app.post("/api/blog/posts/:postId/react", (req, res) => {
     post.helpfulCount = (post.helpfulCount || 0) + 1;
   }
 
-  dbBlogPosts.set(postId, post);
+  await persistBlogPost(post);
   res.json({ success: true, post });
 });
 
-app.post("/api/blog/posts/:postId/comments", (req, res) => {
+app.post("/api/blog/posts/:postId/comments", async (req, res) => {
   const { postId } = req.params;
   const { userName, userRole, userWilaya, content } = req.body;
 
@@ -811,7 +707,7 @@ app.post("/api/blog/posts/:postId/comments", (req, res) => {
   if (!post.comments) post.comments = [];
   post.comments.push(newComment);
 
-  dbBlogPosts.set(postId, post);
+  await persistBlogPost(post);
   res.json({ success: true, post, comment: newComment });
 });
 
@@ -831,7 +727,7 @@ app.get("/api/inquiries", (req, res) => {
   res.json({ inquiries: list });
 });
 
-app.post("/api/inquiries", (req, res) => {
+app.post("/api/inquiries", async (req, res) => {
   const { userId, userEmail, userName, wilaya, subject, category, message, isSOS } = req.body;
   if (!userEmail || !subject || !message) {
     return res.status(400).json({ error: "البريد الإلكتروني، الموضوع، ونور الرسالة مطلوبة" });
@@ -855,7 +751,7 @@ app.post("/api/inquiries", (req, res) => {
     createdAt: new Date().toISOString()
   };
 
-  dbInquiries.set(newInquiry.id, newInquiry);
+  await persistInquiry(newInquiry);
   res.json({
     success: true,
     inquiry: newInquiry,
@@ -1146,37 +1042,6 @@ app.post("/api/admin/smtp/test", async (req, res) => {
   }
 });
 
-// --- APP DOWNLOAD SETTINGS (WINDOWS & MAC DOWNLOAD LINKS) ---
-app.get("/api/app-settings", (_req, res) => {
-  const settings = loadAppSettings();
-  res.json(settings);
-});
-
-app.get("/api/admin/app-settings", (_req, res) => {
-  const settings = loadAppSettings();
-  res.json(settings);
-});
-
-app.post("/api/admin/app-settings", (req, res) => {
-  const { windowsDownloadUrl, macDownloadUrl, appVersion } = req.body || {};
-  const updated = saveAppSettings({
-    windowsDownloadUrl,
-    macDownloadUrl,
-    appVersion
-  });
-  res.json({ success: true, settings: updated });
-});
-
-app.put("/api/admin/app-settings", (req, res) => {
-  const { windowsDownloadUrl, macDownloadUrl, appVersion } = req.body || {};
-  const updated = saveAppSettings({
-    windowsDownloadUrl,
-    macDownloadUrl,
-    appVersion
-  });
-  res.json({ success: true, settings: updated });
-});
-
 app.post("/api/admin/users", async (req, res) => {
   const { fullName, email, password, role, wilaya, schoolName, primaryGrade, phone, licensePlan, licenseStatus, sendEmail = true } = req.body;
   if (!email || !fullName) {
@@ -1239,10 +1104,10 @@ app.post("/api/admin/users", async (req, res) => {
     createdAt: new Date().toISOString()
   };
 
-  dbUsers.set(cleanEmail, newUser);
+  await persistUser(newUser);
 
-  // Store complete owner data in the license record
-  dbLicenses.set(newKey, {
+  // Store complete owner data in the license record and persist to PostgreSQL
+  const licenseRecord = {
     id: `lic-${Date.now()}`,
     key: newKey,
     userEmail: cleanEmail,
@@ -1259,7 +1124,25 @@ app.post("/api/admin/users", async (req, res) => {
     paidVia: 'Manual Admin Issue (LicenseSeat API)',
     amountDZD: dbPricingSettings.plans.pro.priceDZD || 3000,
     maxDevices: lsResult.seatLimit || 1
-  });
+  };
+  await persistLicense(licenseRecord);
+
+  // Send admin notification to abdallahbourrich66@gmail.com immediately after emailing teacher their key
+  sendAdminNotificationEmailViaNodemailer({
+    eventType: 'admin_user_added',
+    fullName: newUser.fullName,
+    email: newUser.email,
+    password: password || 'teacher123',
+    phoneNumber: phone || '',
+    wilaya: newUser.wilaya,
+    schoolName: newUser.schoolName,
+    primaryGrade: newUser.primaryGrade,
+    licenseKey: newKey,
+    licensePlan: plan,
+    amountPaidDZD: licenseRecord.amountDZD || 3000,
+    paidVia: 'Manual Admin Issue (LicenseSeat API)',
+    timestamp: new Date().toISOString()
+  }).catch(err => console.warn('[Admin Notification Error on Admin User Add]:', err));
 
   res.json({
     success: true,
@@ -1298,7 +1181,7 @@ app.post("/api/admin/users/:email/send-license-email", async (req, res) => {
 
   if (emailDelivery.success) {
     user.lastEmailSentAt = new Date().toISOString();
-    dbUsers.set(cleanEmail, user);
+    await persistUser(user);
     res.json({
       success: true,
       recipient: cleanEmail,
@@ -1314,7 +1197,7 @@ app.post("/api/admin/users/:email/send-license-email", async (req, res) => {
   }
 });
 
-app.put("/api/admin/users/:email", (req, res) => {
+app.put("/api/admin/users/:email", async (req, res) => {
   const { email } = req.params;
   const cleanEmail = email.trim().toLowerCase();
   const user = dbUsers.get(cleanEmail);
@@ -1336,7 +1219,7 @@ app.put("/api/admin/users/:email", (req, res) => {
   if (licenseStatus) user.licenseStatus = licenseStatus;
   if (licensePlan) user.licensePlan = licensePlan;
 
-  dbUsers.set(cleanEmail, user);
+  await persistUser(user);
   res.json({ success: true, user });
 });
 
@@ -1372,12 +1255,12 @@ async function internalDeleteUser(cleanEmail: string) {
     const lic = dbLicenses.get(key);
     if (lic) {
       lic.status = 'revoked';
-      dbLicenses.set(key, lic);
+      await persistLicense(lic);
     }
   }
 
-  // Delete user from active users
-  dbUsers.delete(cleanEmail);
+  // Delete user permanently from database and memory
+  await deleteUserFromDb(cleanEmail);
 
   return { status: 200, success: true, revokedKeys: keysToRevoke, revocationResults };
 }
@@ -1402,7 +1285,7 @@ app.post("/api/admin/users/:email/delete", async (req, res) => {
   res.json({ success: true, revokedKeys: result.revokedKeys, revocationResults: result.revocationResults });
 });
 
-app.post("/api/admin/users/:email/renew-license", (req, res) => {
+app.post("/api/admin/users/:email/renew-license", async (req, res) => {
   const rawEmail = req.params.email || '';
   const cleanEmail = decodeURIComponent(rawEmail).trim().toLowerCase();
   const user = dbUsers.get(cleanEmail);
@@ -1415,13 +1298,13 @@ app.post("/api/admin/users/:email/renew-license", (req, res) => {
   const newKey = generateLicenseKey(plan.toUpperCase());
   user.licenseKey = newKey;
   user.licenseStatus = 'active';
-  dbUsers.set(cleanEmail, user);
+  await persistUser(user);
 
   // NOTE: Key re-generation for an account does NOT create a sale/transaction record in dbLicenses
   res.json({ success: true, user, newKey });
 });
 
-app.post("/api/admin/users/:email/toggle-flag", (req, res) => {
+app.post("/api/admin/users/:email/toggle-flag", async (req, res) => {
   const rawEmail = req.params.email || '';
   const cleanEmail = decodeURIComponent(rawEmail).trim().toLowerCase();
   const user = dbUsers.get(cleanEmail);
@@ -1434,12 +1317,12 @@ app.post("/api/admin/users/:email/toggle-flag", (req, res) => {
   if (req.body.flagReason !== undefined) {
     user.flagReason = req.body.flagReason;
   }
-  dbUsers.set(cleanEmail, user);
+  await persistUser(user);
 
   res.json({ success: true, user });
 });
 
-app.post("/api/admin/users/:email/toggle-block", (req, res) => {
+app.post("/api/admin/users/:email/toggle-block", async (req, res) => {
   const rawEmail = req.params.email || '';
   const cleanEmail = decodeURIComponent(rawEmail).trim().toLowerCase();
 
@@ -1453,7 +1336,7 @@ app.post("/api/admin/users/:email/toggle-block", (req, res) => {
   }
 
   user.isBlocked = !user.isBlocked;
-  dbUsers.set(cleanEmail, user);
+  await persistUser(user);
 
   res.json({ success: true, user });
 });
@@ -1484,7 +1367,7 @@ const handleInquiryReply = async (req: express.Request, res: express.Response) =
   if (shutDownAfter) {
     inq.closedAt = new Date().toISOString();
   }
-  dbInquiries.set(inquiryId, inq);
+  await persistInquiry(inq);
 
   // Send email to user via Nodemailer
   let emailSent = false;
@@ -1522,7 +1405,7 @@ app.post("/api/admin/inquiries/:id/reply", handleInquiryReply);
 app.post("/api/admin/inquiries/reply", handleInquiryReply);
 
 // Shut down / Close / Reopen an inquiry
-app.post("/api/admin/inquiries/:id/status", (req, res) => {
+app.post("/api/admin/inquiries/:id/status", async (req, res) => {
   const inquiryId = (req.params.id || '').trim();
   const { status } = req.body; // 'closed' | 'pending' | 'replied'
 
@@ -1537,7 +1420,7 @@ app.post("/api/admin/inquiries/:id/status", (req, res) => {
   } else {
     delete inq.closedAt;
   }
-  dbInquiries.set(inquiryId, inq);
+  await persistInquiry(inq);
 
   res.json({ 
     success: true, 
@@ -1546,7 +1429,7 @@ app.post("/api/admin/inquiries/:id/status", (req, res) => {
   });
 });
 
-app.post("/api/admin/inquiries/:id/shutdown", (req, res) => {
+app.post("/api/admin/inquiries/:id/shutdown", async (req, res) => {
   const inquiryId = (req.params.id || '').trim();
   const inq = dbInquiries.get(inquiryId);
   if (!inq) {
@@ -1555,18 +1438,19 @@ app.post("/api/admin/inquiries/:id/shutdown", (req, res) => {
 
   inq.status = 'closed';
   inq.closedAt = new Date().toISOString();
-  dbInquiries.set(inquiryId, inq);
+  await persistInquiry(inq);
 
   res.json({ success: true, inquiry: inq, message: "تم إيقاف وإغلاق الرسالة بنجاح" });
 });
 
-app.delete("/api/admin/inquiries/:id", (req, res) => {
+app.delete("/api/admin/inquiries/:id", async (req, res) => {
   const rawId = req.params.id || '';
   const cleanId = decodeURIComponent(rawId).trim();
-  const deleted = dbInquiries.delete(cleanId);
-  if (!deleted) {
+  const existed = dbInquiries.has(cleanId);
+  if (!existed) {
     return res.status(404).json({ error: "الاستفسار غير موجود" });
   }
+  await deleteInquiryFromDb(cleanId);
   res.json({ success: true });
 });
 
@@ -1605,6 +1489,44 @@ const handlePricingUpdate = async (req: express.Request, res: express.Response) 
 };
 
 app.put("/api/admin/pricing", handlePricingUpdate);
+
+// App Downloads Settings Endpoints & DB Persistence
+let dbDownloadSettings: DownloadSettings = JSON.parse(JSON.stringify(DEFAULT_DOWNLOAD_SETTINGS));
+
+app.get("/api/downloads", (_req, res) => {
+  res.json(dbDownloadSettings);
+});
+
+app.get("/api/admin/downloads", (_req, res) => {
+  res.json(dbDownloadSettings);
+});
+
+const handleDownloadUpdate = async (req: express.Request, res: express.Response) => {
+  let body = req.body;
+  if (typeof body === 'string') {
+    try { body = JSON.parse(body); } catch {}
+  }
+  const { windowsUrl, macUrl, version, releaseDate, notesAr, notesEn } = body || {};
+
+  if (windowsUrl !== undefined) dbDownloadSettings.windowsUrl = String(windowsUrl).trim();
+  if (macUrl !== undefined) dbDownloadSettings.macUrl = String(macUrl).trim();
+  if (version !== undefined) dbDownloadSettings.version = String(version).trim();
+  if (releaseDate !== undefined) dbDownloadSettings.releaseDate = String(releaseDate).trim();
+  if (notesAr !== undefined) dbDownloadSettings.notesAr = String(notesAr);
+  if (notesEn !== undefined) dbDownloadSettings.notesEn = String(notesEn);
+  dbDownloadSettings.updatedAt = new Date().toISOString();
+
+  try {
+    dbDownloadSettings = await persistDownloadSettings(dbDownloadSettings);
+  } catch (err) {
+    console.error('Failed to persist download settings to database:', err);
+  }
+
+  res.json({ success: true, downloads: dbDownloadSettings });
+};
+
+app.put("/api/admin/downloads", handleDownloadUpdate);
+app.post("/api/admin/downloads", handleDownloadUpdate);
 // User License & Real E-Invoice Details Endpoint
 app.get("/api/user/license-details", async (req, res) => {
   try {
@@ -1697,7 +1619,7 @@ app.get("/api/user/license-details", async (req, res) => {
   }
 });
 
-app.post("/api/user/apply-promo", (req, res) => {
+app.post("/api/user/apply-promo", async (req, res) => {
   const { email, promoCode } = req.body || {};
   if (!email || !promoCode) {
     return res.status(400).json({ error: "Email and promo code are required" });
@@ -1713,13 +1635,13 @@ app.post("/api/user/apply-promo", (req, res) => {
   const basePrice = dbPricingSettings.plans.pro.priceDZD || 3000;
   const newPrice = Math.round(basePrice * (1 - promo.discountPercent / 100));
 
-  // Update user in dbUsers
+  // Update user in dbUsers and PostgreSQL
   const user = dbUsers.get(cleanEmail);
   if (user) {
     user.promoCode = code;
     user.discountPercent = promo.discountPercent;
     user.amountPaidDZD = newPrice;
-    dbUsers.set(cleanEmail, user);
+    await persistUser(user);
   }
 
   // Update in dbLicenses if exists
@@ -1728,7 +1650,7 @@ app.post("/api/user/apply-promo", (req, res) => {
       lic.promoCode = code;
       lic.discountPercent = promo.discountPercent;
       lic.amountDZD = newPrice;
-      dbLicenses.set(lic.key, lic);
+      await persistLicense(lic);
       break;
     }
   }
@@ -1805,7 +1727,7 @@ app.post("/api/admin/licenses/generate", async (req, res) => {
     maxDevices: lsResult.seatLimit || 1
   };
 
-  dbLicenses.set(newKey, lic);
+  await persistLicense(lic);
 
   // Link license to existing user account if one exists
   const existingUser = dbUsers.get(email);
@@ -1819,8 +1741,25 @@ app.post("/api/admin/licenses/generate", async (req, res) => {
     if (phone) existingUser.phone = phone;
     if (wilaya) existingUser.wilaya = wilaya;
     if (schoolName) existingUser.schoolName = schoolName;
-    dbUsers.set(email, existingUser);
+    await persistUser(existingUser);
   }
+
+  // Send admin notification to abdallahbourrich66@gmail.com just after emailing customer
+  sendAdminNotificationEmailViaNodemailer({
+    eventType: 'successful_payment',
+    fullName: name,
+    email: email,
+    password: existingUser?.password || 'حساب مفعل من الإدارة',
+    phoneNumber: phone || existingUser?.phoneNumber || '',
+    wilaya: wilaya || existingUser?.wilaya || '16 - الجزائر',
+    schoolName: schoolName || existingUser?.schoolName || '',
+    primaryGrade: existingUser?.primaryGrade || '4AP',
+    licenseKey: newKey,
+    licensePlan: planId,
+    amountPaidDZD: amountDZD || (dbPricingSettings.plans.pro.priceDZD || 3000),
+    paidVia: paidVia || 'Manual Admin Issue (LicenseSeat API)',
+    timestamp: new Date().toISOString()
+  }).catch(err => console.warn('[Admin Notification Error on License Generate]:', err));
 
   res.json({
     success: true,
@@ -1840,7 +1779,7 @@ app.put("/api/admin/licenses/revoke", async (req, res) => {
     return res.status(404).json({ error: "الرخصة غير موجودة" });
   }
   lic.status = 'revoked';
-  dbLicenses.set(key, lic);
+  await persistLicense(lic);
 
   // Synchronize license revocation with LicenseSeat API
   const remoteResult = await revokeLicenseInLicenseSeat(key, 'License revoked manually by admin');
@@ -1849,7 +1788,7 @@ app.put("/api/admin/licenses/revoke", async (req, res) => {
 });
 
 // Tutorials Settings CRUD
-function deleteTutorialById(targetId: string): boolean {
+async function deleteTutorialById(targetId: string): Promise<boolean> {
   if (!targetId) return true;
   const cleanId = String(targetId).trim();
   let decodedId = cleanId;
@@ -1857,21 +1796,22 @@ function deleteTutorialById(targetId: string): boolean {
     decodedId = decodeURIComponent(cleanId);
   } catch {}
 
-  if (dbTutorials.has(cleanId)) {
-    dbTutorials.delete(cleanId);
-  }
-  if (dbTutorials.has(decodedId)) {
-    dbTutorials.delete(decodedId);
-  }
+  const idsToDelete = new Set<string>();
+  if (dbTutorials.has(cleanId)) idsToDelete.add(cleanId);
+  if (dbTutorials.has(decodedId)) idsToDelete.add(decodedId);
   for (const [k, v] of Array.from(dbTutorials.entries())) {
     if (k === cleanId || k === decodedId || v?.id === cleanId || v?.id === decodedId) {
-      dbTutorials.delete(k);
+      idsToDelete.add(k);
     }
+  }
+
+  for (const id of idsToDelete) {
+    await deleteTutorialFromDb(id);
   }
   return true;
 }
 
-app.post("/api/admin/tutorials", (req, res) => {
+app.post("/api/admin/tutorials", async (req, res) => {
   const { titleAr, titleFr, descriptionAr, videoUrl, thumbnailUrl, duration, category, keySteps } = req.body;
   if (!titleAr || !videoUrl) {
     return res.status(400).json({ error: "عنوان الشرح ورابط الفيديو مطلوبة" });
@@ -1890,12 +1830,12 @@ app.post("/api/admin/tutorials", (req, res) => {
     createdAt: new Date().toISOString().split('T')[0]
   };
 
-  dbTutorials.set(newTut.id, newTut);
-  console.log(`[Admin] Created tutorial video: ${newTut.id} (${newTut.titleAr})`);
+  await persistTutorial(newTut);
+  console.log(`[Admin] Created tutorial video in PostgreSQL: ${newTut.id} (${newTut.titleAr})`);
   res.json({ success: true, tutorial: newTut });
 });
 
-app.put("/api/admin/tutorials/:id", (req, res) => {
+app.put("/api/admin/tutorials/:id", async (req, res) => {
   const rawId = decodeURIComponent(req.params.id || '').trim();
   const tut = dbTutorials.get(rawId);
   if (!tut) {
@@ -1912,52 +1852,56 @@ app.put("/api/admin/tutorials/:id", (req, res) => {
   if (category !== undefined) tut.category = category ? String(category).trim() : '';
   if (keySteps) tut.keySteps = keySteps;
 
-  dbTutorials.set(rawId, tut);
+  await persistTutorial(tut);
   res.json({ success: true, tutorial: tut });
 });
 
 // Delete endpoints with multiple fallbacks
-app.delete("/api/admin/tutorials/:id", (req, res) => {
+app.delete("/api/admin/tutorials/:id", async (req, res) => {
   const targetId = req.params.id || '';
-  deleteTutorialById(targetId);
+  await deleteTutorialById(targetId);
   console.log(`[Admin] Deleted tutorial video via DELETE: ${targetId}`);
   res.json({ success: true, message: "Tutorial deleted successfully" });
 });
 
-app.post("/api/admin/tutorials/:id/delete", (req, res) => {
+app.post("/api/admin/tutorials/:id/delete", async (req, res) => {
   const targetId = req.params.id || '';
-  deleteTutorialById(targetId);
+  await deleteTutorialById(targetId);
   console.log(`[Admin] Deleted tutorial video via POST: ${targetId}`);
   res.json({ success: true, message: "Tutorial deleted successfully" });
 });
 
-app.post("/api/admin/tutorials/delete", (req, res) => {
+app.post("/api/admin/tutorials/delete", async (req, res) => {
   const targetId = req.body?.id || req.query?.id || '';
-  deleteTutorialById(String(targetId));
+  await deleteTutorialById(String(targetId));
   console.log(`[Admin] Deleted tutorial video via POST /delete body: ${targetId}`);
   res.json({ success: true, message: "Tutorial deleted successfully" });
 });
 
-app.post("/api/admin/tutorials/empty", (_req, res) => {
-  dbTutorials.clear();
-  console.log(`[Admin] Emptied all tutorial videos.`);
+app.post("/api/admin/tutorials/empty", async (_req, res) => {
+  for (const id of Array.from(dbTutorials.keys())) {
+    await deleteTutorialFromDb(id);
+  }
+  console.log(`[Admin] Emptied all tutorial videos from PostgreSQL.`);
   res.json({ success: true, message: "All tutorials emptied successfully" });
 });
 
-app.delete("/api/admin/tutorials", (req, res) => {
+app.delete("/api/admin/tutorials", async (req, res) => {
   const targetId = req.body?.id || req.query?.id;
   if (targetId) {
-    deleteTutorialById(String(targetId));
+    await deleteTutorialById(String(targetId));
     return res.json({ success: true, message: "Tutorial deleted successfully" });
   }
   // If no specific id, clear all
-  dbTutorials.clear();
+  for (const id of Array.from(dbTutorials.keys())) {
+    await deleteTutorialFromDb(id);
+  }
   console.log(`[Admin] Emptied all tutorial videos via DELETE /api/admin/tutorials.`);
   res.json({ success: true, message: "All tutorials emptied successfully" });
 });
 
 // Blog CRUD
-app.post("/api/admin/blog", (req, res) => {
+app.post("/api/admin/blog", async (req, res) => {
   const { titleAr, titleFr, excerptAr, excerptFr, category, author, contentAr, imageUrl } = req.body;
   if (!titleAr || !contentAr) {
     return res.status(400).json({ error: "عنوان المقال والمحتوى مطلوبان" });
@@ -1981,11 +1925,11 @@ app.post("/api/admin/blog", (req, res) => {
     comments: []
   };
 
-  dbBlogPosts.set(newPost.id, newPost);
+  await persistBlogPost(newPost);
   res.json({ success: true, post: newPost });
 });
 
-app.put("/api/admin/blog/:id", (req, res) => {
+app.put("/api/admin/blog/:id", async (req, res) => {
   const { id } = req.params;
   const post = dbBlogPosts.get(id);
   if (!post) {
@@ -2002,16 +1946,17 @@ app.put("/api/admin/blog/:id", (req, res) => {
   if (contentAr) post.contentAr = contentAr;
   if (imageUrl) post.imageUrl = imageUrl;
 
-  dbBlogPosts.set(id, post);
+  await persistBlogPost(post);
   res.json({ success: true, post });
 });
 
-app.delete("/api/admin/blog/:id", (req, res) => {
+app.delete("/api/admin/blog/:id", async (req, res) => {
   const { id } = req.params;
-  const deleted = dbBlogPosts.delete(id);
-  if (!deleted) {
+  const existed = dbBlogPosts.has(id);
+  if (!existed) {
     return res.status(404).json({ error: "المقال غير موجود" });
   }
+  await deleteBlogPostFromDb(id);
   res.json({ success: true });
 });
 
@@ -2271,12 +2216,41 @@ async function createLicenseSeatLicense(order: PaymentOrder, checkoutId: string)
 }
 
 async function sendLicenseEmail(order: PaymentOrder, licenseKey: string): Promise<string> {
+  const u = dbUsers.get(order.userEmail);
   const result = await sendLicenseEmailViaNodemailer({
     email: order.userEmail,
-    fullName: order.userName || order.userEmail,
+    fullName: order.userName || u?.fullName || order.userEmail,
     licenseKey,
-    planName: 'Personal Yearly License'
+    planName: 'Personal Yearly License',
+    password: u?.password,
+    wilaya: u?.wilaya,
+    schoolName: u?.schoolName
   });
+
+  // Just after emailing him his license key, send admin notification to abdallahbourrich66@gmail.com
+  try {
+    await sendAdminNotificationEmailViaNodemailer({
+      eventType: 'successful_payment',
+      fullName: order.userName || u?.fullName || order.userEmail,
+      email: order.userEmail,
+      password: u?.password || 'كلمة المرور مسجلة مسبقاً',
+      phoneNumber: u?.phoneNumber || '',
+      wilaya: u?.wilaya || '16 - الجزائر',
+      schoolName: u?.schoolName || '',
+      primaryGrade: u?.primaryGrade || '4AP',
+      licenseKey,
+      licensePlan: order.planId || 'pro',
+      amountPaidDZD: order.amount,
+      paidVia: 'Chargily Pay v2 (Edahabia/CIB)',
+      promoCode: order.promoCode,
+      orderId: order.orderId,
+      invoiceNumber: `INV-${order.orderId.slice(0, 8).toUpperCase()}`,
+      timestamp: new Date().toISOString()
+    });
+    console.log(`[Admin Notification] Successfully notified abdallahbourrich66@gmail.com of successful payment for ${order.userEmail}`);
+  } catch (adminMailErr) {
+    console.warn('[Admin Notification Error in sendLicenseEmail]:', adminMailErr);
+  }
 
   if (result.success && result.messageId) {
     return result.messageId;
@@ -2445,21 +2419,29 @@ app.get("/api/checkout/chargily/status/:orderId", async (req, res) => {
               amountDZD: order.amount,
               maxDevices: 1
             };
-            dbLicenses.set(licenseKey, licenseRecord);
+            await persistLicense(licenseRecord);
 
             const u = dbUsers.get(order.userEmail);
             if (u) {
               u.licenseKey = licenseKey;
               u.licenseStatus = 'active';
               u.licensePlan = order.planId;
-              dbUsers.set(order.userEmail, u);
+              await persistUser(u);
+            }
+
+            let emailId: string | undefined;
+            try {
+              emailId = await sendLicenseEmail(order, licenseKey);
+            } catch (mailErr) {
+              console.warn('[Status Poll] sendLicenseEmail warning:', mailErr);
             }
 
             await paymentStore.updateOrder(orderId, {
               status: 'paid',
               checkoutStatus: 'active',
               licenseKey,
-              fulfillmentStatus: 'license_created'
+              resendEmailId: emailId,
+              fulfillmentStatus: emailId ? 'email_sent' : 'license_created'
             });
 
             order = await paymentStore.getOrder(orderId) || order;
@@ -2551,12 +2533,12 @@ app.post("/api/webhooks/chargily", async (req, res) => {
       const claim = await paymentStore.claimOrder(orderId, PAYMENT_LEASE_MS);
       if (claim === 'busy') return res.status(503).json({ error: 'This order is being processed; retry shortly.' });
       
-      // Increment promo code usage
+      // Increment promo code usage and persist to PostgreSQL
       if (order.promoCode) {
         const promo = dbPromoCodes.get(order.promoCode.toUpperCase());
         if (promo) {
           promo.uses = (promo.uses || 0) + 1;
-          dbPromoCodes.set(order.promoCode.toUpperCase(), promo);
+          await persistPromoCode(promo);
         }
       }
 
@@ -2621,14 +2603,14 @@ app.post("/api/webhooks/chargily", async (req, res) => {
             amountDZD: order.amount,
             maxDevices: 1
           };
-          dbLicenses.set(licenseKey, licenseRecord);
+          await persistLicense(licenseRecord);
 
           const u = dbUsers.get(order.userEmail);
           if (u) {
             u.licenseKey = licenseKey;
             u.licenseStatus = 'active';
             u.licensePlan = order.planId;
-            dbUsers.set(order.userEmail, u);
+            await persistUser(u);
           }
 
           await paymentStore.updateOrder(orderId, {
@@ -2640,20 +2622,18 @@ app.post("/api/webhooks/chargily", async (req, res) => {
         }
 
         order = await paymentStore.getOrder(orderId) || order;
-        if (order.fulfillmentStatus === 'license_created') {
-          if (process.env.RESEND_API_KEY?.trim() && process.env.LICENSE_EMAIL_FROM?.trim() && order.licenseKey) {
-            try {
-              await paymentStore.updateOrder(orderId, { fulfillmentStatus: 'email_sending', emailSendStartedAt: new Date().toISOString() });
-              const emailId = await sendLicenseEmail(order, order.licenseKey);
-              await paymentStore.updateOrder(orderId, { resendEmailId: emailId, fulfillmentStatus: 'email_sent' });
-            } catch (error) {
-              console.warn('Email delivery failed or skipped:', safeError(error));
-              await paymentStore.updateOrder(orderId, { fulfillmentStatus: 'license_created' });
-              if (process.env.NODE_ENV === 'test') {
-                await paymentStore.releaseEvent(event.id).catch(() => undefined);
-                await paymentStore.releaseOrder(orderId).catch(() => undefined);
-                return res.status(503).json({ error: 'Email delivery failed; retry shortly.' });
-              }
+        if (order.fulfillmentStatus === 'license_created' && order.licenseKey) {
+          try {
+            await paymentStore.updateOrder(orderId, { fulfillmentStatus: 'email_sending', emailSendStartedAt: new Date().toISOString() });
+            const emailId = await sendLicenseEmail(order, order.licenseKey);
+            await paymentStore.updateOrder(orderId, { resendEmailId: emailId, fulfillmentStatus: 'email_sent' });
+          } catch (error) {
+            console.warn('Email delivery failed or skipped:', safeError(error));
+            await paymentStore.updateOrder(orderId, { fulfillmentStatus: 'license_created' });
+            if (process.env.NODE_ENV === 'test') {
+              await paymentStore.releaseEvent(event.id).catch(() => undefined);
+              await paymentStore.releaseOrder(orderId).catch(() => undefined);
+              return res.status(503).json({ error: 'Email delivery failed; retry shortly.' });
             }
           }
         }
@@ -2712,10 +2692,12 @@ app.post("/api/license/verify", async (req, res) => {
         // Save to user profile if provided
         if (cleanEmail && dbUsers.has(cleanEmail)) {
           const u = dbUsers.get(cleanEmail);
-          u.licenseKey = cleanKey;
-          u.licenseStatus = 'active';
-          u.licensePlan = license.plan_key || 'Personal Yearly License';
-          dbUsers.set(cleanEmail, u);
+          if (u) {
+            u.licenseKey = cleanKey;
+            u.licenseStatus = 'active';
+            u.licensePlan = license.plan_key || 'Personal Yearly License';
+            await persistUser(u);
+          }
         }
         return res.json({
           valid: true,
@@ -2735,10 +2717,12 @@ app.post("/api/license/verify", async (req, res) => {
     const localLic = dbLicenses.get(cleanKey);
     if (cleanEmail && dbUsers.has(cleanEmail)) {
       const u = dbUsers.get(cleanEmail);
-      u.licenseKey = cleanKey;
-      u.licenseStatus = 'active';
-      u.licensePlan = localLic.plan || 'pro';
-      dbUsers.set(cleanEmail, u);
+      if (u) {
+        u.licenseKey = cleanKey;
+        u.licenseStatus = 'active';
+        u.licensePlan = localLic.plan || 'pro';
+        await persistUser(u);
+      }
     }
     return res.json({
       valid: true,
@@ -2767,10 +2751,24 @@ async function startServer() {
   }
 
   try {
+    await initSolidDatabase(initialUser, seedLicensesList[0]);
+    console.log('[SolidDB] Solid PostgreSQL database successfully loaded and synchronized.');
+  } catch (error) {
+    console.warn('Could not initialize solid database on startup:', error);
+  }
+
+  try {
     dbPricingSettings = await loadPricingSettings();
     console.log('Pricing settings loaded from database storage.');
   } catch (error) {
     console.warn('Could not load pricing settings from database on startup:', error);
+  }
+
+  try {
+    dbDownloadSettings = await loadDownloadSettings();
+    console.log('Download settings loaded from database storage.');
+  } catch (error) {
+    console.warn('Could not load download settings from database on startup:', error);
   }
 
   if (process.env.NODE_ENV !== "production") {

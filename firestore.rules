@@ -1,0 +1,61 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Security Helper Functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'abdallahbourrich66@gmail.com' ||
+        request.auth.token.role == 'admin' ||
+        (request.auth.token.email != null && request.auth.token.email.matches('.*admin.*'))
+      );
+    }
+
+    // User profiles collection
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isSignedIn();
+      allow update: if isOwner(userId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // License records collection
+    match /licenses/{licenseKey} {
+      allow read: if isSignedIn() && (request.auth.token.email == resource.data.userEmail || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    // Promo codes collection
+    match /promoCodes/{code} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Support Inquiries & SOS tickets
+    match /inquiries/{inquiryId} {
+      allow read: if isSignedIn() && (request.auth.uid == resource.data.userId || request.auth.token.email == resource.data.userEmail || isAdmin());
+      allow create: if true;
+      allow update, delete: if isAdmin();
+    }
+
+    // Pricing Settings
+    match /pricingSettings/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Download Links
+    match /downloadSettings/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+  }
+}

@@ -41,9 +41,8 @@ import {
   MessageSquare,
   Download,
   ExternalLink,
-  Link as LinkIcon,
-  Monitor,
-  Laptop
+  Laptop,
+  Monitor
 } from 'lucide-react';
 import {
   AreaChart,
@@ -60,7 +59,7 @@ import {
   ResponsiveContainer,
   Legend
 } from 'recharts';
-import { UserProfile, SupportInquiry, LicenseRecord, BlogPost, TutorialVideo, PricingSettings, AppDownloadSettings } from '../types';
+import { UserProfile, SupportInquiry, LicenseRecord, BlogPost, TutorialVideo, PricingSettings, DownloadSettings } from '../types';
 import { ALGERIAN_WILAYAS } from '../data/syllabus';
 import { Language } from './Navbar';
 
@@ -71,7 +70,7 @@ interface AdminDashboardProps {
   onExitToSite?: () => void;
 }
 
-type AdminTab = 'overview' | 'accounts' | 'sales' | 'pricing' | 'promos' | 'tutorials' | 'enquiries' | 'blog' | 'smtp' | 'downloads';
+type AdminTab = 'overview' | 'accounts' | 'sales' | 'pricing' | 'promos' | 'downloads' | 'tutorials' | 'enquiries' | 'blog' | 'smtp';
 
 const DEFAULT_PRICING: PricingSettings = {
   currencyDZD: 'DZD (Algerian Dinar)',
@@ -133,6 +132,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
   const [loadingPricing, setLoadingPricing] = useState<boolean>(false);
   const [isSavingPricing, setIsSavingPricing] = useState<boolean>(false);
   const [pricingSuccessMsg, setPricingSuccessMsg] = useState<string | null>(null);
+
+  // App Downloads state
+  const [downloadSettings, setDownloadSettings] = useState<DownloadSettings>({
+    windowsUrl: 'https://github.com/TeacherCompanion/releases/download/v2.4/TeacherCompanion_v2.4_Setup.exe',
+    macUrl: 'https://github.com/TeacherCompanion/releases/download/v2.4/TeacherCompanion_v2.4_macOS.dmg',
+    version: '2.4.0-DZ',
+    releaseDate: '2026-09-01',
+    notesAr: 'الإصدار الرسمي 2.4.0 المعتمد لأساتذة التعليم الابتدائي الجزائري',
+    notesEn: 'Official Desktop Release v2.4.0 for Algerian Primary Educators'
+  });
+  const [loadingDownloads, setLoadingDownloads] = useState<boolean>(false);
+  const [isSavingDownloads, setIsSavingDownloads] = useState<boolean>(false);
+  const [downloadSuccessMsg, setDownloadSuccessMsg] = useState<string | null>(null);
+  const [downloadErrorMsg, setDownloadErrorMsg] = useState<string | null>(null);
+  const [copiedLinkType, setCopiedLinkType] = useState<'windows' | 'mac' | null>(null);
   
   const [promosList, setPromosList] = useState<Array<{
     code: string;
@@ -259,16 +273,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
   const [testEmailTarget, setTestEmailTarget] = useState<string>('');
   const [smtpFeedback, setSmtpFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // App Download Settings
-  const [appDownloadSettings, setAppDownloadSettings] = useState<AppDownloadSettings>({
-    windowsDownloadUrl: '',
-    macDownloadUrl: '',
-    appVersion: 'v2.4.0-DZ'
-  });
-  const [loadingAppSettings, setLoadingAppSettings] = useState<boolean>(false);
-  const [savingAppSettings, setSavingAppSettings] = useState<boolean>(false);
-  const [appSettingsFeedback, setAppSettingsFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-
   const [newTutorialForm, setNewTutorialForm] = useState({
     titleAr: '',
     descriptionAr: '',
@@ -320,7 +324,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
     fetchBlogPosts();
     fetchPricingSettings();
     fetchPromos();
-    fetchAppSettings();
+    fetchDownloadSettings();
   }, []);
 
   // Guarantee persistence when user leaves, quits, or unloads
@@ -351,6 +355,59 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
       }
     };
   }, []);
+
+  const fetchDownloadSettings = async () => {
+    setLoadingDownloads(true);
+    try {
+      const res = await fetch('/api/admin/downloads');
+      if (res.ok) {
+        const data = await res.json();
+        if (data && (data.windowsUrl || data.macUrl)) {
+          setDownloadSettings(data);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load downloads settings:', e);
+    } finally {
+      setLoadingDownloads(false);
+    }
+  };
+
+  const handleSaveDownloads = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setIsSavingDownloads(true);
+    setDownloadSuccessMsg(null);
+    setDownloadErrorMsg(null);
+    try {
+      const res = await fetch('/api/admin/downloads', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(downloadSettings)
+      });
+      const data = await res.json();
+      if (res.ok && data?.success) {
+        if (data.downloads) {
+          setDownloadSettings(data.downloads);
+        }
+        setDownloadSuccessMsg('✅ تم حفظ روابط التحميل بنجاح وتم ربطها فورياً بأزرار التحميل للموقع!');
+        setTimeout(() => setDownloadSuccessMsg(null), 4500);
+      } else {
+        setDownloadErrorMsg(data?.error || 'فشل حفظ روابط التحميل');
+      }
+    } catch (err: any) {
+      console.error('Failed to persist downloads:', err);
+      setDownloadErrorMsg(err?.message || 'خطأ في الاتصال أثناء حفظ روابط التحميل');
+    } finally {
+      setIsSavingDownloads(false);
+    }
+  };
+
+  const handleCopyDownloadLink = (type: 'windows' | 'mac', url: string) => {
+    if (!url) return;
+    navigator.clipboard.writeText(url);
+    setCopiedLinkType(type);
+    setTimeout(() => setCopiedLinkType(null), 2500);
+  };
 
   const fetchPricingSettings = async () => {
     setLoadingPricing(true);
@@ -954,60 +1011,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
     setTimeout(() => setCopiedPreparedEmail(false), 3000);
   };
 
-  // App Download Settings Handlers
-  const fetchAppSettings = async () => {
-    setLoadingAppSettings(true);
-    try {
-      const res = await fetch('/api/admin/app-settings');
-      if (res.ok) {
-        const data = await res.json();
-        setAppDownloadSettings({
-          windowsDownloadUrl: data.windowsDownloadUrl || '',
-          macDownloadUrl: data.macDownloadUrl || '',
-          appVersion: data.appVersion || 'v2.4.0-DZ',
-          lastUpdated: data.lastUpdated
-        });
-      }
-    } catch (e) {
-      console.error('Failed to load app settings:', e);
-    } finally {
-      setLoadingAppSettings(false);
-    }
-  };
-
-  const handleSaveAppSettings = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSavingAppSettings(true);
-    setAppSettingsFeedback(null);
-    try {
-      const res = await fetch('/api/admin/app-settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(appDownloadSettings)
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setAppDownloadSettings(data.settings);
-        setAppSettingsFeedback({
-          type: 'success',
-          text: '✅ تم حفظ رابط تحميل البرنامج بنجاح! سيتم توجيه المعلمين الآن عند الضغط على زر تحميل ويندوز إلى هذا الرابط مباشرة.'
-        });
-      } else {
-        setAppSettingsFeedback({
-          type: 'error',
-          text: data.error || 'فشل حفظ رابط التحميل'
-        });
-      }
-    } catch (err: any) {
-      setAppSettingsFeedback({
-        type: 'error',
-        text: err?.message || 'خطأ في الاتصال بالخادم أثناء الحفظ'
-      });
-    } finally {
-      setSavingAppSettings(false);
-    }
-  };
-
   // Tutorials Handlers
   const handleCreateTutorial = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1606,6 +1609,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
           </button>
 
           <button
+            onClick={() => {
+              setActiveTab('downloads');
+              fetchDownloadSettings();
+            }}
+            className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 whitespace-nowrap ${
+              activeTab === 'downloads'
+                ? 'bg-[#0D9488] text-white shadow-md shadow-teal-500/20'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <Download className="w-4 h-4" />
+            <span>Download Links</span>
+            <span className="px-1.5 py-0.2 bg-slate-950 text-teal-300 text-[10px] rounded-full">
+              Win / Mac
+            </span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('tutorials')}
             className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 whitespace-nowrap ${
               activeTab === 'tutorials'
@@ -1663,86 +1684,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
               <span className="w-2 h-2 rounded-full bg-emerald-400" title="SMTP Configured"></span>
             )}
           </button>
-
-          <button
-            onClick={() => {
-              setActiveTab('downloads');
-              fetchAppSettings();
-            }}
-            className={`px-4 py-2.5 rounded-xl transition-all flex items-center gap-2 whitespace-nowrap ${
-              activeTab === 'downloads'
-                ? 'bg-[#0D9488] text-white shadow-md shadow-teal-500/20'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800'
-            }`}
-          >
-            <Download className="w-4 h-4" />
-            <span>App Downloads & Links</span>
-            {appDownloadSettings.windowsDownloadUrl ? (
-              <span className="w-2 h-2 rounded-full bg-emerald-400" title="Windows Link Configured"></span>
-            ) : (
-              <span className="w-2 h-2 rounded-full bg-amber-400" title="Windows Link Not Configured"></span>
-            )}
-          </button>
         </div>
 
         {/* TAB 1: OVERVIEW & ANALYTICS */}
         {activeTab === 'overview' && (
           <div className="space-y-6 animate-fadeIn">
             
-            {/* Quick Access: Windows App Download Link */}
-            <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm">
-              <div className="flex items-center gap-3.5">
-                <div className="p-3 bg-teal-500/10 border border-teal-500/20 text-[#0D9488] rounded-2xl shrink-0">
-                  <Monitor className="w-6 h-6" />
-                </div>
-                <div className="space-y-0.5">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-extrabold text-white">
-                      رابط تحميل نسخة ويندوز (Windows Download Link)
-                    </span>
-                    {appDownloadSettings.windowsDownloadUrl ? (
-                      <span className="px-2 py-0.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold rounded-full flex items-center gap-1">
-                        <Check className="w-3 h-3" />
-                        <span>رابط مخصص مفعل</span>
-                      </span>
-                    ) : (
-                      <span className="px-2 py-0.5 bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[10px] font-bold rounded-full flex items-center gap-1">
-                        <AlertCircle className="w-3 h-3" />
-                        <span>التحميل المحلي الافتراضي</span>
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-slate-400 font-mono truncate max-w-xl">
-                    {appDownloadSettings.windowsDownloadUrl || 'لم يتم تعيين رابط خارجي بعد (يتم تنزيل ملف التثبيت الافتراضي)'}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0 self-end md:self-auto">
-                {appDownloadSettings.windowsDownloadUrl && (
-                  <a
-                    href={appDownloadSettings.windowsDownloadUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5 text-teal-400" />
-                    <span>تجربة الرابط</span>
-                  </a>
-                )}
-                <button
-                  onClick={() => {
-                    setActiveTab('downloads');
-                    fetchAppSettings();
-                  }}
-                  className="px-4 py-2 bg-[#0D9488] hover:bg-teal-700 text-white text-xs font-bold rounded-xl transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Edit className="w-3.5 h-3.5" />
-                  <span>تعديل رابط التحميل</span>
-                </button>
-              </div>
-            </div>
-
             {/* Metric KPI Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               
@@ -3304,6 +3251,378 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
           </div>
         )}
 
+        {/* TAB 3.8: APP DOWNLOAD LINKS MANAGEMENT */}
+        {activeTab === 'downloads' && (
+          <div className="space-y-6 animate-fadeIn">
+            {/* Header / Intro Card */}
+            <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-6 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-start gap-4">
+                  <div className="p-3.5 bg-gradient-to-tr from-teal-500 to-blue-600 text-white rounded-2xl shadow-lg shadow-teal-500/20 shrink-0">
+                    <Download className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2.5">
+                      <h2 className="text-xl font-black text-white tracking-tight">
+                        Desktop Download Links & Releases
+                      </h2>
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-teal-500/10 border border-teal-500/30 text-teal-400">
+                        Live Sync
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
+                      Configure the exact download URLs for Windows and Mac OS desktop installers. Linux has been removed from the teacher modal. When teachers click download on the site, they will be taken directly to the links set below.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={fetchDownloadSettings}
+                    disabled={loadingDownloads}
+                    className="px-3.5 py-2.5 bg-slate-900 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5"
+                    title="Refresh latest settings from server"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${loadingDownloads ? 'animate-spin' : ''}`} />
+                    <span>Refresh</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSaveDownloads()}
+                    disabled={isSavingDownloads}
+                    className="px-5 py-2.5 bg-[#0D9488] hover:bg-teal-700 text-white text-xs font-extrabold rounded-xl shadow-lg shadow-teal-500/20 transition-all flex items-center gap-2 hover:scale-[1.02] active:scale-[0.98]"
+                  >
+                    {isSavingDownloads ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Saving...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4" />
+                        <span>Save Download Links</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Feedback messages */}
+              {downloadSuccessMsg && (
+                <div className="mt-4 p-3.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 text-xs font-bold flex items-center gap-2 animate-fadeIn">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>{downloadSuccessMsg}</span>
+                </div>
+              )}
+              {downloadErrorMsg && (
+                <div className="mt-4 p-3.5 bg-red-500/10 border border-red-500/30 rounded-xl text-red-300 text-xs font-bold flex items-center gap-2 animate-fadeIn">
+                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                  <span>{downloadErrorMsg}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Operating Systems Configuration Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              
+              {/* Card 1: Windows Download Configuration */}
+              <div className="bg-slate-800/80 border border-teal-500/30 rounded-2xl p-6 space-y-4 shadow-sm relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-teal-500/5 rounded-full pointer-events-none" />
+                
+                <div className="flex items-center justify-between border-b border-slate-700/60 pb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/20">
+                      <Monitor className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                        Windows (.exe) Installer Link
+                        <span className="text-[10px] bg-teal-500/20 text-teal-300 px-2 py-0.5 rounded font-bold">Active</span>
+                      </h3>
+                      <p className="text-[11px] text-slate-400">Windows 10 / 11 (64-bit)</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-3 text-xs">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-200 mb-1.5 flex items-center justify-between">
+                      <span>Windows Download URL:</span>
+                      <span className="text-[10px] text-teal-400 font-semibold uppercase">Direct / Cloud Link</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="url"
+                        required
+                        value={downloadSettings.windowsUrl}
+                        onChange={(e) => setDownloadSettings({ ...downloadSettings, windowsUrl: e.target.value })}
+                        placeholder="https://drive.google.com/... or https://your-domain.com/downloads/TeacherMate_Setup.exe"
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-mono text-xs focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1.5">
+                      Accepts direct downloadable links, Google Drive public links, Dropbox, Mediafire, Mega, or your web server URL.
+                    </p>
+                  </div>
+
+                  {/* Actions: Test & Copy */}
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <a
+                      href={downloadSettings.windowsUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-1.5 bg-slate-900 hover:bg-slate-700 text-teal-300 border border-slate-700 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>Test Windows Link</span>
+                    </a>
+
+                    <button
+                      type="button"
+                      onClick={() => handleCopyDownloadLink('windows', downloadSettings.windowsUrl)}
+                      className="px-3 py-1.5 bg-slate-900 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>{copiedLinkType === 'windows' ? '✓ Copied!' : 'Copy Link'}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 2: Mac OS Download Configuration */}
+              <div className="bg-slate-800/80 border border-blue-500/30 rounded-2xl p-6 space-y-4 shadow-sm relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 rounded-full pointer-events-none" />
+
+                <div className="flex items-center justify-between border-b border-slate-700/60 pb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                      <Laptop className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                        Mac OS (.dmg) Installer Link
+                        <span className="text-[10px] bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded font-bold">Active</span>
+                      </h3>
+                      <p className="text-[11px] text-slate-400">Apple Silicon (M1/M2/M3) & Intel</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-3 text-xs">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-200 mb-1.5 flex items-center justify-between">
+                      <span>Mac OS Download URL:</span>
+                      <span className="text-[10px] text-blue-400 font-semibold uppercase">Direct / Cloud Link</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="url"
+                        required
+                        value={downloadSettings.macUrl}
+                        onChange={(e) => setDownloadSettings({ ...downloadSettings, macUrl: e.target.value })}
+                        placeholder="https://drive.google.com/... or https://your-domain.com/downloads/TeacherMate_macOS.dmg"
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-mono text-xs focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1.5">
+                      Accepts direct downloadable disk image (.dmg) links or cloud drive download URLs.
+                    </p>
+                  </div>
+
+                  {/* Actions: Test & Copy */}
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <a
+                      href={downloadSettings.macUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-1.5 bg-slate-900 hover:bg-slate-700 text-blue-300 border border-slate-700 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>Test Mac Link</span>
+                    </a>
+
+                    <button
+                      type="button"
+                      onClick={() => handleCopyDownloadLink('mac', downloadSettings.macUrl)}
+                      className="px-3 py-1.5 bg-slate-900 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>{copiedLinkType === 'mac' ? '✓ Copied!' : 'Copy Link'}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Linux Status Box */}
+            <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 flex items-center gap-3.5">
+              <div className="p-2.5 bg-slate-800 text-slate-400 rounded-xl shrink-0">
+                <Ban className="w-5 h-5 text-red-400" />
+              </div>
+              <div className="text-xs">
+                <span className="font-extrabold text-white">Linux Download Status: Stripped Out</span>
+                <p className="text-slate-400 mt-0.5">
+                  The Linux (.AppImage / .deb) download button has been permanently stripped out from the teacher modal. Only Mac OS and Windows buttons are rendered.
+                </p>
+              </div>
+            </div>
+
+            {/* Release Version & Description Form */}
+            <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-6 space-y-4 shadow-sm">
+              <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                <Tag className="w-4 h-4 text-teal-400" />
+                <span>Version & Release Information</span>
+              </h3>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                    Software Version:
+                  </label>
+                  <input
+                    type="text"
+                    value={downloadSettings.version}
+                    onChange={(e) => setDownloadSettings({ ...downloadSettings, version: e.target.value })}
+                    placeholder="e.g. 2.4.0-DZ"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-mono text-xs focus:outline-none focus:border-teal-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                    Release Date:
+                  </label>
+                  <input
+                    type="date"
+                    value={downloadSettings.releaseDate || ''}
+                    onChange={(e) => setDownloadSettings({ ...downloadSettings, releaseDate: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white font-mono text-xs focus:outline-none focus:border-teal-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                    Release Notes (Arabic):
+                  </label>
+                  <input
+                    type="text"
+                    value={downloadSettings.notesAr || ''}
+                    onChange={(e) => setDownloadSettings({ ...downloadSettings, notesAr: e.target.value })}
+                    placeholder="النسخة الرسمية المعتمدة..."
+                    dir="rtl"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-xs focus:outline-none focus:border-teal-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                    Release Notes (English):
+                  </label>
+                  <input
+                    type="text"
+                    value={downloadSettings.notesEn || ''}
+                    onChange={(e) => setDownloadSettings({ ...downloadSettings, notesEn: e.target.value })}
+                    placeholder="Official desktop release for..."
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-white text-xs focus:outline-none focus:border-teal-500"
+                  />
+                </div>
+              </div>
+
+              {/* Bottom Save Bar */}
+              <div className="pt-4 border-t border-slate-700/60 flex flex-col sm:flex-row items-center justify-between gap-3">
+                <span className="text-[11px] text-slate-400">
+                  Last updated: {downloadSettings.updatedAt ? new Date(downloadSettings.updatedAt).toLocaleString() : 'Just now'}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => handleSaveDownloads()}
+                  disabled={isSavingDownloads}
+                  className="px-6 py-2.5 bg-[#0D9488] hover:bg-teal-700 text-white text-xs font-extrabold rounded-xl shadow-lg transition-all flex items-center gap-2"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>{isSavingDownloads ? 'Saving...' : 'Save All Changes'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Live Interactive Preview */}
+            <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-teal-400" />
+                    <span>Live Preview of Teacher Download Modal</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    This is how the download options appear to teachers on the public site (Linux is completely stripped out).
+                  </p>
+                </div>
+                <span className="text-xs text-teal-400 font-bold bg-teal-500/10 px-3 py-1 rounded-full border border-teal-500/20">
+                  v{downloadSettings.version || '2.4.0'}
+                </span>
+              </div>
+
+              <div className="bg-white rounded-xl p-5 border border-slate-200 text-slate-800 space-y-3 max-w-lg mx-auto shadow-md">
+                <div className="text-center pb-2 border-b border-slate-100">
+                  <h4 className="font-extrabold text-base text-[#1E3A8A]">Download Teacher Mate</h4>
+                  <p className="text-[11px] text-slate-500">Only Mac and Windows available</p>
+                </div>
+
+                {/* Windows Option Preview */}
+                <div className="p-3.5 bg-[#F8FAFC] rounded-lg border border-teal-300 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-md bg-teal-50 text-[#0D9488] border border-teal-200">
+                      <Monitor className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h5 className="text-xs font-bold text-[#1E3A8A]">Windows (.exe)</h5>
+                      <p className="text-[10px] text-slate-500">Target: {downloadSettings.windowsUrl || 'Not set'}</p>
+                    </div>
+                  </div>
+                  <a
+                    href={downloadSettings.windowsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-1.5 bg-[#0D9488] text-white font-bold text-xs rounded-md shadow-xs flex items-center gap-1 hover:bg-teal-700"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download</span>
+                  </a>
+                </div>
+
+                {/* Mac OS Option Preview */}
+                <div className="p-3.5 bg-[#F8FAFC] rounded-lg border border-slate-200 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-md bg-purple-50 text-purple-700 border border-purple-200">
+                      <Laptop className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h5 className="text-xs font-bold text-[#1E3A8A]">macOS (.dmg)</h5>
+                      <p className="text-[10px] text-slate-500">Target: {downloadSettings.macUrl || 'Not set'}</p>
+                    </div>
+                  </div>
+                  <a
+                    href={downloadSettings.macUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-1.5 bg-[#1E3A8A] text-white font-bold text-xs rounded-md shadow-xs flex items-center gap-1 hover:bg-blue-900"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download</span>
+                  </a>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        )}
+
         {activeTab === 'tutorials' && (
           <div className="space-y-4 animate-fadeIn">
             
@@ -3955,276 +4274,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user, onLogout, 
                     تستخدم هذه الأداة Nodemailer لإجراء فحص حي لمنفذ 587 وإرسال رسالة نموذجية.
                   </div>
                 </div>
-              </div>
-
-            </div>
-
-          </div>
-        )}
-
-        {/* TAB 8: APP DOWNLOADS & LINKS SETTINGS */}
-        {activeTab === 'downloads' && (
-          <div className="space-y-6 animate-fadeIn">
-            
-            {/* Header Banner */}
-            <div className="bg-slate-800/90 border border-slate-700 rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2.5">
-                  <div className="p-2 bg-teal-500/10 border border-teal-500/30 rounded-xl text-teal-400">
-                    <Download className="w-5 h-5" />
-                  </div>
-                  <h3 className="text-base font-extrabold text-white">
-                    إعدادات روابط تحميل برنامج Teacher Mate
-                  </h3>
-                  {appDownloadSettings.windowsDownloadUrl ? (
-                    <span className="px-2.5 py-0.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-[11px] font-extrabold rounded-full flex items-center gap-1">
-                      <Check className="w-3 h-3" />
-                      <span>رابط ويندوز مخصص ومفعل</span>
-                    </span>
-                  ) : (
-                    <span className="px-2.5 py-0.5 bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] font-extrabold rounded-full flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3" />
-                      <span>في انتظار تحديد الرابط الخارجي</span>
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-slate-300 leading-relaxed max-w-2xl">
-                  قم بوضع رابط تحميل البرنامج لنسخة ويندوز (مثل رابط Google Drive مباشر، Mediafire، Mega، Dropbox، أو خادمك الخاص). عند ضغط المعلم على زر <strong>تحميل للويندوز</strong> في الواجهة الرئيسية، سيتم توجيهه فوراً إلى هذا الرابط.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={fetchAppSettings}
-                disabled={loadingAppSettings}
-                className="px-3.5 py-2 bg-slate-700/60 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 self-end md:self-auto shrink-0 cursor-pointer"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${loadingAppSettings ? 'animate-spin' : ''}`} />
-                <span>تحديث الحالة</span>
-              </button>
-            </div>
-
-            {/* Notification Banner */}
-            {appSettingsFeedback && (
-              <div className={`p-4 rounded-xl text-xs flex items-center justify-between gap-3 shadow-sm animate-fadeIn ${
-                appSettingsFeedback.type === 'success' ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300' : 'bg-rose-500/10 border border-rose-500/30 text-rose-300'
-              }`}>
-                <div className="flex items-center gap-2.5 font-bold">
-                  {appSettingsFeedback.type === 'success' ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  ) : (
-                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-                  )}
-                  <span>{appSettingsFeedback.text}</span>
-                </div>
-                <button
-                  onClick={() => setAppSettingsFeedback(null)}
-                  className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-700/50 cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              
-              {/* Form Card */}
-              <div className="lg:col-span-2 bg-slate-800/80 border border-slate-700/80 rounded-2xl p-6 space-y-6">
-                
-                <div className="flex items-center justify-between border-b border-slate-700 pb-3">
-                  <h4 className="text-sm font-extrabold text-white flex items-center gap-2">
-                    <Save className="w-4 h-4 text-teal-400" />
-                    <span>تعديل وحفظ روابط التحميل</span>
-                  </h4>
-                  <span className="text-[11px] text-slate-400 font-mono">
-                    {appDownloadSettings.lastUpdated ? `آخر تحديث: ${new Date(appDownloadSettings.lastUpdated).toLocaleDateString()}` : ''}
-                  </span>
-                </div>
-
-                <form onSubmit={handleSaveAppSettings} className="space-y-5 text-xs">
-                  
-                  {/* Windows Link Field (HIGHLIGHTED PRIMARY FIELD) */}
-                  <div className="space-y-2 p-4 bg-slate-900/60 rounded-xl border-2 border-teal-500/50">
-                    <div className="flex items-center justify-between">
-                      <label className="text-teal-300 font-extrabold flex items-center gap-2 text-xs">
-                        <Monitor className="w-4 h-4 text-teal-400" />
-                        <span>رابط تحميل نسخة ويندوز (Windows Download URL) *</span>
-                      </label>
-                      <span className="text-[10px] px-2 py-0.5 bg-teal-500/20 text-teal-300 font-bold rounded">
-                        الرئيسي المطلوب
-                      </span>
-                    </div>
-
-                    <div className="relative">
-                      <input
-                        type="url"
-                        value={appDownloadSettings.windowsDownloadUrl}
-                        onChange={(e) => setAppDownloadSettings({ ...appDownloadSettings, windowsDownloadUrl: e.target.value })}
-                        placeholder="https://drive.google.com/uc?export=download&id=... أو https://yourhost.com/TeacherMate_Setup.exe"
-                        className="w-full bg-slate-800 border border-slate-600 focus:border-[#0D9488] focus:ring-1 focus:ring-[#0D9488] rounded-xl px-3.5 py-2.5 text-white font-mono text-xs outline-none transition-colors"
-                      />
-                    </div>
-
-                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[11px] text-slate-400">
-                      <span className="flex items-center gap-1 text-slate-400">
-                        <span>💡 يدعم جميع الروابط: Google Drive، Mediafire، Mega، OneDrive، روابط مباشرة (.exe).</span>
-                      </span>
-
-                      {appDownloadSettings.windowsDownloadUrl && (
-                        <div className="flex items-center gap-2">
-                          <a
-                            href={appDownloadSettings.windowsDownloadUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-teal-400 hover:text-teal-300 font-bold flex items-center gap-1 hover:underline"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5" />
-                            <span>فحص الرابط في نافذة جديدة</span>
-                          </a>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Mac OS Link Field (Optional) */}
-                  <div className="space-y-2 p-4 bg-slate-900/40 rounded-xl border border-slate-700/80">
-                    <label className="text-slate-300 font-extrabold flex items-center gap-2 text-xs">
-                      <Laptop className="w-4 h-4 text-purple-400" />
-                      <span>رابط تحميل نسخة ماك (Mac OS Download URL - اختياري)</span>
-                    </label>
-
-                    <input
-                      type="url"
-                      value={appDownloadSettings.macDownloadUrl || ''}
-                      onChange={(e) => setAppDownloadSettings({ ...appDownloadSettings, macDownloadUrl: e.target.value })}
-                      placeholder="https://.../TeacherMate_macOS.dmg (اتركه فارغاً للتنزيل الافتراضي)"
-                      className="w-full bg-slate-800 border border-slate-600 focus:border-[#0D9488] focus:ring-1 focus:ring-[#0D9488] rounded-xl px-3.5 py-2.5 text-white font-mono text-xs outline-none transition-colors"
-                    />
-                  </div>
-
-                  {/* App Version Label */}
-                  <div className="space-y-2 p-4 bg-slate-900/40 rounded-xl border border-slate-700/80">
-                    <label className="text-slate-300 font-extrabold flex items-center gap-2 text-xs">
-                      <Tag className="w-4 h-4 text-blue-400" />
-                      <span>رقم إصدار البرنامج المعروض للمعلمين (App Version)</span>
-                    </label>
-
-                    <input
-                      type="text"
-                      value={appDownloadSettings.appVersion || 'v2.4.0-DZ'}
-                      onChange={(e) => setAppDownloadSettings({ ...appDownloadSettings, appVersion: e.target.value })}
-                      placeholder="v2.4.0-DZ"
-                      className="w-full sm:w-64 bg-slate-800 border border-slate-600 focus:border-[#0D9488] focus:ring-1 focus:ring-[#0D9488] rounded-xl px-3.5 py-2 text-white font-mono text-xs outline-none transition-colors"
-                    />
-                  </div>
-
-                  {/* Save Button */}
-                  <div className="pt-2">
-                    <button
-                      type="submit"
-                      disabled={savingAppSettings}
-                      className="w-full py-3 bg-[#0D9488] hover:bg-teal-700 disabled:opacity-50 text-white font-extrabold text-xs rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      {savingAppSettings ? (
-                        <>
-                          <RefreshCw className="w-4 h-4 animate-spin" />
-                          <span>جاري حفظ الرابط في قاعدة البيانات...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Save className="w-4 h-4" />
-                          <span>حفظ رابط التحميل وتطبيقه على الفور (Save Download Link)</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-
-                </form>
-
-              </div>
-
-              {/* Side Preview & Status Card */}
-              <div className="space-y-6">
-                
-                {/* Live Preview of Teacher Modal */}
-                <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-5 space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-700 pb-3">
-                    <h4 className="text-xs font-extrabold text-white flex items-center gap-1.5">
-                      <Sparkles className="w-4 h-4 text-teal-400" />
-                      <span>معاينة حية لنافذة المعلم (Modal Preview)</span>
-                    </h4>
-                    <span className="text-[10px] text-teal-300 font-semibold">
-                      ويندوز + ماك فقط
-                    </span>
-                  </div>
-
-                  <p className="text-[11px] text-slate-300 leading-relaxed">
-                    تمت إزالة زر نظام لينكس، ويظهر للمعلم خيارا الويندوز والماك فقط:
-                  </p>
-
-                  <div className="bg-slate-900 rounded-xl p-3 border border-slate-700 space-y-2.5">
-                    {/* Windows Preview */}
-                    <div className="p-3 bg-slate-800 rounded-lg border border-teal-500/40 flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <Monitor className="w-4 h-4 text-teal-400" />
-                        <div>
-                          <div className="text-xs font-bold text-white">Windows (.exe)</div>
-                          <div className="text-[10px] text-slate-400">Windows 10 / 11</div>
-                        </div>
-                      </div>
-                      <span className="px-2.5 py-1 bg-[#0D9488] text-white rounded-lg text-[10px] font-bold flex items-center gap-1">
-                        {appDownloadSettings.windowsDownloadUrl ? <ExternalLink className="w-3 h-3" /> : <Download className="w-3 h-3" />}
-                        <span>تحميل</span>
-                      </span>
-                    </div>
-
-                    {/* Mac Preview */}
-                    <div className="p-3 bg-slate-800 rounded-lg border border-slate-700 flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <Laptop className="w-4 h-4 text-purple-400" />
-                        <div>
-                          <div className="text-xs font-bold text-white">Mac OS (.dmg)</div>
-                          <div className="text-[10px] text-slate-400">Apple Silicon & Intel</div>
-                        </div>
-                      </div>
-                      <span className="px-2.5 py-1 bg-slate-700 text-white rounded-lg text-[10px] font-bold flex items-center gap-1">
-                        <Download className="w-3 h-3" />
-                        <span>تحميل</span>
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="p-3 bg-teal-500/10 border border-teal-500/20 rounded-xl space-y-1">
-                    <div className="text-[11px] font-bold text-teal-300 flex items-center gap-1.5">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-teal-400" />
-                      <span>الرابط المستهدف حالياً:</span>
-                    </div>
-                    <p className="text-[10px] text-slate-300 font-mono break-all">
-                      {appDownloadSettings.windowsDownloadUrl || 'لم يتم تحديد رابط خارجي بعد (سيتم تنزيل المثبت المدمج)'}
-                    </p>
-                  </div>
-
-                </div>
-
-                {/* Helpful Guide */}
-                <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-5 space-y-3 text-xs text-slate-300">
-                  <h4 className="font-extrabold text-white flex items-center gap-2 border-b border-slate-700 pb-2">
-                    <HelpCircle className="w-4 h-4 text-amber-400" />
-                    <span>إرشادات وضع الرابط</span>
-                  </h4>
-                  <ul className="space-y-2 list-disc list-inside text-[11px] text-slate-400">
-                    <li>
-                      <strong className="text-slate-200">Google Drive:</strong> تأكد من جعل مشاركة الملف "Anyone with the link (أي شخص لديه الرابط)".
-                    </li>
-                    <li>
-                      <strong className="text-slate-200">Mediafire / Mega:</strong> يمكنك لصق رابط صفحة التحميل أو الرابط المباشر.
-                    </li>
-                    <li>
-                      <strong className="text-slate-200">تحديث فوري:</strong> عند الحفظ يتم التحديث فوراً في الواجهة دون الحاجة لإعادة تشغيل الخادم.
-                    </li>
-                  </ul>
-                </div>
-
               </div>
 
             </div>

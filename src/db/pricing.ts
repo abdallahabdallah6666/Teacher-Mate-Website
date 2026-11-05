@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+import { createPool } from './index.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -78,60 +78,35 @@ export const DEFAULT_PRICING_SETTINGS: PricingSettingsData = {
 
 const BACKUP_PATH = path.join(process.cwd(), 'src/db/pricing-backup.json');
 
-function getDbPool(): Pool | null {
-  const host = (process.env.SQL_HOST || process.env.DB_HOST)?.trim();
-  const user = (process.env.SQL_USER || process.env.DB_USER)?.trim();
-  const database = (process.env.SQL_DB_NAME || process.env.DB_NAME)?.trim();
-  const password = process.env.SQL_PASSWORD || process.env.DB_PASS;
-
-  if (host && user && database && password) {
-    return new Pool({
-      host,
-      user,
-      password,
-      database,
-      max: 3,
-      connectionTimeoutMillis: 5000,
-      idleTimeoutMillis: 30000,
-    });
-  }
-  return null;
-}
-
 export async function loadPricingSettings(): Promise<PricingSettingsData> {
-  const pool = getDbPool();
-  if (pool) {
-    try {
-      const res = await pool.query(
-        "SELECT currency_dzd, promo_notice_ar, promo_notice_fr, promo_notice_en, plans FROM pricing_settings WHERE id = 'current' LIMIT 1"
-      );
-      if (res.rows[0]) {
-        const row = res.rows[0];
-        const loadedPlans = row.plans || {};
-        const merged: PricingSettingsData = {
-          currencyDZD: row.currency_dzd || DEFAULT_PRICING_SETTINGS.currencyDZD,
-          promoNoticeAr: row.promo_notice_ar ?? DEFAULT_PRICING_SETTINGS.promoNoticeAr,
-          promoNoticeFr: row.promo_notice_fr ?? DEFAULT_PRICING_SETTINGS.promoNoticeFr,
-          promoNoticeEn: row.promo_notice_en ?? DEFAULT_PRICING_SETTINGS.promoNoticeEn,
-          plans: {
-            pro: {
-              ...DEFAULT_PRICING_SETTINGS.plans.pro,
-              ...(loadedPlans.pro || {}),
-              priceDZD: Math.max(50, Number(loadedPlans.pro?.priceDZD || DEFAULT_PRICING_SETTINGS.plans.pro.priceDZD))
-            }
+  try {
+    const pool = createPool();
+    const res = await pool.query(
+      "SELECT currency_dzd, promo_notice_ar, promo_notice_fr, promo_notice_en, plans FROM pricing_settings WHERE id = 'current' LIMIT 1"
+    );
+    if (res.rows[0]) {
+      const row = res.rows[0];
+      const loadedPlans = row.plans || {};
+      const merged: PricingSettingsData = {
+        currencyDZD: row.currency_dzd || DEFAULT_PRICING_SETTINGS.currencyDZD,
+        promoNoticeAr: row.promo_notice_ar ?? DEFAULT_PRICING_SETTINGS.promoNoticeAr,
+        promoNoticeFr: row.promo_notice_fr ?? DEFAULT_PRICING_SETTINGS.promoNoticeFr,
+        promoNoticeEn: row.promo_notice_en ?? DEFAULT_PRICING_SETTINGS.promoNoticeEn,
+        plans: {
+          pro: {
+            ...DEFAULT_PRICING_SETTINGS.plans.pro,
+            ...(loadedPlans.pro || {}),
+            priceDZD: Math.max(50, Number(loadedPlans.pro?.priceDZD || DEFAULT_PRICING_SETTINGS.plans.pro.priceDZD))
           }
-        };
-        // Also keep local backup fresh
-        try {
-          fs.writeFileSync(BACKUP_PATH, JSON.stringify(merged, null, 2), 'utf-8');
-        } catch {}
-        return merged;
-      }
-    } catch (err: any) {
-      console.warn('Could not read pricing from PostgreSQL, falling back to local file/defaults:', err?.message || err);
-    } finally {
-      await pool.end().catch(() => undefined);
+        }
+      };
+      try {
+        fs.writeFileSync(BACKUP_PATH, JSON.stringify(merged, null, 2), 'utf-8');
+      } catch {}
+      return merged;
     }
+  } catch (err: any) {
+    console.warn('Could not read pricing from PostgreSQL, falling back to local file/defaults:', err?.message || err);
   }
 
   // Fallback to local backup JSON file if available
@@ -149,7 +124,6 @@ export async function loadPricingSettings(): Promise<PricingSettingsData> {
 }
 
 export async function persistPricingSettings(settings: PricingSettingsData): Promise<PricingSettingsData> {
-  // Validate and clamp all prices to minimum 50 DZD (Chargily minimum limit)
   const cleanSettings: PricingSettingsData = {
     currencyDZD: settings.currencyDZD || DEFAULT_PRICING_SETTINGS.currencyDZD,
     promoNoticeAr: settings.promoNoticeAr,
@@ -171,33 +145,29 @@ export async function persistPricingSettings(settings: PricingSettingsData): Pro
   }
 
   // 2. Persist to Cloud SQL / PostgreSQL
-  const pool = getDbPool();
-  if (pool) {
-    try {
-      await pool.query(
-        `INSERT INTO pricing_settings (id, currency_dzd, promo_notice_ar, promo_notice_fr, promo_notice_en, plans, updated_at)
-         VALUES ('current', $1, $2, $3, $4, $5, NOW())
-         ON CONFLICT (id) DO UPDATE SET
-           currency_dzd = EXCLUDED.currency_dzd,
-           promo_notice_ar = EXCLUDED.promo_notice_ar,
-           promo_notice_fr = EXCLUDED.promo_notice_fr,
-           promo_notice_en = EXCLUDED.promo_notice_en,
-           plans = EXCLUDED.plans,
-           updated_at = NOW()`,
-        [
-          cleanSettings.currencyDZD,
-          cleanSettings.promoNoticeAr || null,
-          cleanSettings.promoNoticeFr || null,
-          cleanSettings.promoNoticeEn || null,
-          JSON.stringify(cleanSettings.plans)
-        ]
-      );
-      console.log('Pricing settings successfully saved to PostgreSQL database.');
-    } catch (err: any) {
-      console.error('Failed to persist pricing to PostgreSQL:', err?.message || err);
-    } finally {
-      await pool.end().catch(() => undefined);
-    }
+  try {
+    const pool = createPool();
+    await pool.query(
+      `INSERT INTO pricing_settings (id, currency_dzd, promo_notice_ar, promo_notice_fr, promo_notice_en, plans, updated_at)
+       VALUES ('current', $1, $2, $3, $4, $5, NOW())
+       ON CONFLICT (id) DO UPDATE SET
+         currency_dzd = EXCLUDED.currency_dzd,
+         promo_notice_ar = EXCLUDED.promo_notice_ar,
+         promo_notice_fr = EXCLUDED.promo_notice_fr,
+         promo_notice_en = EXCLUDED.promo_notice_en,
+         plans = EXCLUDED.plans,
+         updated_at = NOW()`,
+      [
+        cleanSettings.currencyDZD,
+        cleanSettings.promoNoticeAr || null,
+        cleanSettings.promoNoticeFr || null,
+        cleanSettings.promoNoticeEn || null,
+        JSON.stringify(cleanSettings.plans)
+      ]
+    );
+    console.log('[Pricing] Pricing settings successfully saved to PostgreSQL database.');
+  } catch (err: any) {
+    console.error('Failed to persist pricing to PostgreSQL:', err?.message || err);
   }
 
   return cleanSettings;
